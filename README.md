@@ -1,1 +1,2 @@
-# vi_tobit
+# Variational Inference for Tobit model
+
