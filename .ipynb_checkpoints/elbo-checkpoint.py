@@ -2,6 +2,7 @@ import numpy as np
 from scipy.stats import norm
 from scipy.special import ndtr
 from numpy.polynomial.hermite import hermgauss
+from tqdm import tqdm
 
 
 def gh_integral(f, mu, s, n_gh = 20):
@@ -226,3 +227,213 @@ def adam(X, y,l,u, tau2,m0, log_s0, log_sigma2_y0,
                 break
 
     return params[:d], params[d:2 * d], params[-1], elbo_hist[1:]
+
+### Spike and slab ####
+
+import numpy as np
+from scipy.stats import norm
+
+def _unpack(theta, d):
+    m = theta[0:d]
+    log_s2 = theta[d:2*d]
+    logit_gamma = theta[2*d:3*d]
+    log_sigma_y2 = theta[3*d]
+    s2 = np.exp(log_s2)
+    gamma = 1.0 / (1.0 + np.exp(-logit_gamma))
+    sigma_y2 = np.exp(log_sigma_y2)
+    return m, s2, gamma, sigma_y2
+
+def _pack(m, s2, gamma, sigma_y2):
+    logit_gamma = np.log(gamma) - np.log(1.0 - gamma)
+    log_s2 = np.log(s2)
+    log_sigma_y2 = np.log(sigma_y2)
+    return np.concatenate([m, log_s2, logit_gamma, [log_sigma_y2]])
+
+def elbo_spike_and_slab(theta, X, y, l, u, pi0, tau2, n_mc=20, seed=None):
+    n, d = X.shape
+    m, s2, gamma, sigma_y2 = _unpack(theta, d)
+    sigma_y = np.sqrt(sigma_y2)
+
+    Sigma_diag = gamma * s2
+    mu = X @ m
+    var = (X ** 2) @ Sigma_diag
+
+    idx_l = (y == l)
+    idx_u = (y == u)
+    idx_c = ~(idx_l | idx_u)
+
+    rng = np.random.default_rng(seed)
+
+    ll = 0.0
+
+    if idx_c.any():
+        yi = y[idx_c]
+        mui = mu[idx_c]
+        vari = var[idx_c]
+        ll += np.sum(
+            -0.5 * np.log(2 * np.pi * sigma_y2)
+            - ((yi - mui) ** 2 + vari) / (2 * sigma_y2)
+        )
+
+    def censored_term(idx, boundary, sign):
+        if not idx.any():
+            return 0.0
+        mui = mu[idx]
+        sdi = np.sqrt(var[idx])
+        eps = rng.standard_normal((n_mc, idx.sum()))
+        ui = mui[None, :] + sdi[None, :] * eps
+        z = sign * (boundary - ui) / sigma_y
+        log_phi = norm.logcdf(z)
+        return np.sum(np.mean(log_phi, axis=0))
+
+    ll += censored_term(idx_l, l, 1.0)
+    ll += censored_term(idx_u, u, -1.0)
+
+    kl = np.sum(
+        gamma * (
+            np.log(gamma / pi0)
+            + 0.5 * np.log(tau2 / s2)
+            + (s2 + m ** 2) / (2 * tau2)
+            - 0.5
+        )
+        + (1 - gamma) * np.log((1 - gamma) / (1 - pi0))
+    )
+
+    return ll - kl
+
+def elbo_spike_and_slab_grad(theta, X, y, l, u, pi0, tau2, n_mc=20, seed=None):
+    n, d = X.shape
+    m, s2, gamma, sigma_y2 = _unpack(theta, d)
+    sigma_y = np.sqrt(sigma_y2)
+
+    Sigma_diag = gamma * s2
+    mu = X @ m
+    var = (X ** 2) @ Sigma_diag
+
+    idx_l = (y == l)
+    idx_u = (y == u)
+    idx_c = ~(idx_l | idx_u)
+
+    rng = np.random.default_rng(seed)
+
+    d_mu = np.zeros(n)
+    d_var = np.zeros(n)
+    d_sigma_y2 = 0.0
+
+    if idx_c.any():
+        yi = y[idx_c]
+        mui = mu[idx_c]
+        vari = var[idx_c]
+        d_mu[idx_c] = (yi - mui) / sigma_y2
+        d_var[idx_c] = -1.0 / (2 * sigma_y2)
+        d_sigma_y2 += np.sum(
+            -1.0 / (2 * sigma_y2)
+            + ((yi - mui) ** 2 + vari) / (2 * sigma_y2 ** 2)
+        )
+
+    def censored_grad(idx, boundary, sign):
+        nonlocal d_sigma_y2
+        if not idx.any():
+            return
+        mui = mu[idx]
+        sdi = np.sqrt(var[idx])
+        eps = rng.standard_normal((n_mc, idx.sum()))
+        ui = mui[None, :] + sdi[None, :] * eps
+        z = sign * (boundary - ui) / sigma_y
+        pdf_cdf_ratio = np.exp(norm.logpdf(z) - norm.logcdf(z))
+
+        dz_dmu = sign * (-1.0) / sigma_y
+        dz_dsd = sign * (-eps) / sigma_y
+        dz_dsigma_y = -z / sigma_y
+
+        g = pdf_cdf_ratio
+        d_mu[idx] += np.mean(g * dz_dmu, axis=0)
+
+        safe_sdi = np.where(sdi > 0, sdi, 1.0)
+        d_sd = np.mean(g * dz_dsd, axis=0)
+        d_var_i = d_sd / (2 * safe_sdi)
+        d_var_i = np.where(sdi > 0, d_var_i, 0.0)
+        d_var[idx] += d_var_i
+
+        d_sigma_y_scalar = np.sum(np.mean(g * dz_dsigma_y, axis=0))
+        d_sigma_y2 += d_sigma_y_scalar / (2 * sigma_y)
+
+    censored_grad(idx_l, l, 1.0)
+    censored_grad(idx_u, u, -1.0)
+
+    d_m = X.T @ d_mu
+    d_Sigma_diag = (X ** 2).T @ d_var
+
+    d_gamma_ll = s2 * d_Sigma_diag
+    d_s2_ll = gamma * d_Sigma_diag
+
+    d_m_kl = gamma * m / tau2
+    d_s2_kl = gamma * (1.0 / (2 * tau2) - 1.0 / (2 * s2))
+    d_gamma_kl = (
+        np.log(gamma / (1 - gamma))
+        - np.log(pi0 / (1 - pi0))
+        + 0.5 * np.log(tau2 / s2)
+        + (s2 + m ** 2) / (2 * tau2)
+        - 0.5
+    )
+
+    d_m_total = d_m - d_m_kl
+    d_s2_total = d_s2_ll - d_s2_kl
+    d_gamma_total = d_gamma_ll - d_gamma_kl
+
+    d_log_s2 = d_s2_total * s2
+    d_logit_gamma = d_gamma_total * gamma * (1 - gamma)
+    d_log_sigma_y2 = d_sigma_y2 * sigma_y2
+
+    grad = np.concatenate([d_m_total, d_log_s2, d_logit_gamma, [d_log_sigma_y2]])
+    return grad
+
+def adam_vi(X, y, l, u, pi0=0.5, tau2=1.0, n_iter=2000, lr=0.01,
+            seed=None, theta0=None, n_mc=20,
+            beta1=0.9, beta2=0.999, eps=1e-8):
+    n, d = X.shape
+    rng = np.random.default_rng(seed)
+
+    if theta0 is None:
+        m0 = np.zeros(d)
+        s2_0 = np.ones(d) * tau2
+        gamma0 = np.ones(d) * pi0
+        sigma_y2_0 = np.var(y[(y > l) & (y < u)]) if np.any((y > l) & (y < u)) else 1.0
+        theta = _pack(m0, s2_0, gamma0, sigma_y2_0)
+    else:
+        theta = theta0.copy()
+
+    p = theta.shape[0]
+    mt = np.zeros(p)
+    vt = np.zeros(p)
+
+    elbo_history = np.zeros(n_iter)
+
+    pbar = tqdm(range(1, n_iter + 1), desc="ADAM VI")
+    for it in pbar:
+        step_seed = None if seed is None else seed + it
+        grad = elbo_spike_and_slab_grad(theta, X, y, l, u, pi0, tau2,
+                                         n_mc=n_mc, seed=step_seed)
+        grad = -grad
+
+        mt = beta1 * mt + (1 - beta1) * grad
+        vt = beta2 * vt + (1 - beta2) * (grad ** 2)
+        mt_hat = mt / (1 - beta1 ** it)
+        vt_hat = vt / (1 - beta2 ** it)
+
+        theta = theta - lr * mt_hat / (np.sqrt(vt_hat) + eps)
+
+        elbo_history[it - 1] = elbo_spike_and_slab(theta, X, y, l, u, pi0, tau2,
+                                                    n_mc=n_mc, seed=step_seed)
+
+    d = X.shape[1]
+    m, s2, gamma, sigma_y2 = _unpack(theta, d)
+
+    return {
+        "theta": theta,
+        "m": m,
+        "s2": s2,
+        "gamma": gamma,
+        "sigma_y2": sigma_y2,
+        "elbo_history": elbo_history,
+    }
