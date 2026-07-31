@@ -76,3 +76,23 @@ def y_tobit(X, l_perc, u_perc, beta_true, sigma_y_true=1.0, seed=None):
 
     return y, l, u
 
+def y_tobit_2(X, l_perc, u_perc, beta_true, sigma_y_true=None, snr=None, seed=None):
+    if (sigma_y_true is None) == (snr is None):
+        raise ValueError("Please specify exactly one of the arguments: sigma_y_true or snr.")
+    
+    rng = np.random.default_rng(seed)
+    n, d = X.shape
+    
+    signal = X @ beta_true
+    signal_var = np.var(signal)
+    
+    if sigma_y_true is None:
+        sigma_y_true = np.sqrt(signal_var / snr)
+    else:
+        snr = signal_var / sigma_y_true**2
+    
+    y_latent = signal + rng.normal(0, sigma_y_true, n)
+    l, u = np.percentile(y_latent, l_perc), np.percentile(y_latent, u_perc)
+    y = np.clip(y_latent, l, u)
+    
+    return y, l, u, sigma_y_true, snr
