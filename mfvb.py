@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.stats import norm
-from scipy.special import logit, expit, log_ndtr
+from scipy.special import logit, expit, log_ndtr, gammaln, digamma
 from tqdm.auto import tqdm
 
 
@@ -31,7 +31,7 @@ class q_tobit:
     """
 
     def __init__(self, X, y, l=None, u=None, tau2=25.0, pi0=0.1,
-                 delta=0.01, eps=0.01, seed=None):
+                 delta=0.01, eps=0.01, seed=None, tol = 0.01):
         self.X = X
         self.y = np.asarray(y, dtype=float)
         self.n, self.d = X.shape
@@ -43,6 +43,7 @@ class q_tobit:
         self.logit_pi0 = logit(pi0)
         self.delta = delta
         self.eps = eps
+        self.tol = tol
 
         # Censorship tresholds
         if l is None:
@@ -128,11 +129,30 @@ class q_tobit:
         resid_base = self.mu - self.eta
         Xt_resid_base = self.X.T @ resid_base
         correction = self.rho * self.m * self.XtX_diag
-
         linear_term = (self.a / self.b) * self.m * (Xt_resid_base + correction)
         quad_term = (self.a / (2 * self.b)) * (self.m**2 + self.S_diag) * self.XtX_diag
-
         self.rho = expit(self.logit_pi0 - quad_term + linear_term)
+        self.rho = np.clip(self.rho, 1e-10, 1 - 1e-10)
+        self.R = self._build_R(self.rho)
+
+    def update_gamma_seq(self):
+        for j in self.rng.permutation(self.d):
+            xj = self.X[:, j]
+    
+            # Residual excluding variable j's current contribution
+            resid_j = self.mu - self.eta + self.rho[j] * self.m[j] * xj
+    
+            linear_term = (self.a / self.b) * self.m[j] * (xj @ resid_j)
+            quad_term = (self.a / (2 * self.b)) * (self.m[j]**2 + self.S_diag[j]) * self.XtX_diag[j]
+    
+            rho_j_new = expit(self.logit_pi0 - quad_term + linear_term)
+            rho_j_new = np.clip(rho_j_new, 1e-10, 1 - 1e-10)
+    
+            # Update eta incrementally to reflect the new rho_j
+            self.eta = resid_j - self.rho[j] * self.m[j] * xj + rho_j_new * self.m[j] * xj
+    
+            self.rho[j] = rho_j_new
+    
         self.R = self._build_R(self.rho)
 
     def update_sigma(self):
@@ -247,25 +267,59 @@ class q_tobit:
 
         return elbo
                     
-
+    # ------------------------------------------------------------------
+    def update_tau2(self, damping=0.3):
+        """
+        M-step with damping: move only partway toward the new EM estimate,
+        to avoid destabilizing CAVI with abrupt hyperparameter jumps.
+        
+        damping : float in (0, 1]
+            1.0 = full EM update (no damping)
+            smaller values = more conservative, slower update
+        """
+        tau2_new = np.mean(self.m**2 + self.S_diag)
+        self.tau2 = (1 - damping) * self.tau2 + damping * tau2_new
+    
+    
+    def update_pi0(self, damping=0.3):
+        pi0_new = np.clip(self.rho.mean(), 1e-4, 1 - 1e-4)
+        self.pi0 = (1 - damping) * self.pi0 + damping * pi0_new
+        self.logit_pi0 = logit(self.pi0)
+        
     
     # ------------------------------------------------------------------
-    def step(self):
+    def step(self, it, warmup, damping, gamma_seq):
         """Jeden pełny cykl aktualizacji CAVI: beta -> y* -> gamma -> sigma."""
+        
         self.update_beta()
         self.update_ystar()
-        self.update_gamma()
+        if gamma_seq:
+            self.update_gamma_seq()
+        else:
+            self.update_gamma()
         self.update_sigma()
+        
         self.elbo_history.append(self.compute_elbo())
 
-    def fit(self, n_iter=1000, verbose=True):
-        pbar = tqdm(range(n_iter), desc="MFVI", disable=not verbose)
-        for _ in pbar:
-            self.step()
+        if it >=  warmup:
+            self.update_tau2(damping)
+            self.update_pi0(damping)
+
+    def fit(self, n_iter=1000, em_warmup=50, damping=0.3, verbose=True, gamma_seq=False):
+        
+        pbar = tqdm(range(n_iter+em_warmup), desc="MFVI", disable=not verbose)
+        
+        for it in pbar:
+            self.step(it, em_warmup, damping, gamma_seq)
+            
+            if it > em_warmup:
+                if abs(self.elbo_history[it] - self.elbo_history[it-1]) < self.tol:
+                    print("Early stopping")
+                    break
+                    
         return self
 
     # ------------------------------------------------------------------
-    @property
     def sig_vi(self, threshold=0.95):
         """Zwraca maskę zmiennych uznanych za istotne (rho > threshold)."""
         return self.rho > threshold
