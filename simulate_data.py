@@ -59,9 +59,8 @@ def beta_sparse(d, beta_scale, perc, seed = None):
     rng = np.random.default_rng(seed)
 
     beta_raw = beta_basic(d, beta_scale, seed)
-    indices = rng.choice([0,1], d, p = [1-perc,perc])
-
-    return beta_raw * indices
+    beta_raw *= rng.random(d) < perc
+    return beta_raw
 
 
 def y_tobit(X, l_perc, u_perc, beta_true, sigma_y_true=1.0, seed=None):

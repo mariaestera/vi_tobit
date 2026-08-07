@@ -1,0 +1,27 @@
+{
+    "X_design": {
+        "n": 20000,
+        "d": 15000,
+        "method": "corr_block",
+        "params": {
+            "k": 100,
+            "corr": 0.9
+        },
+        "intercept": false
+    },
+    "experiment": {
+        "r2": 0.3,
+        "perc_sig": 0.001,
+        "l_perc": 20,
+        "u_perc": 95
+    },
+    "gibbs_params": {
+        "n_iters": 10,
+        "burn-in": 5,
+        "em_warmup": 3
+    },
+    "vi_params": {
+        "n_iters": 2000,
+        "em_warmup": 0
+    }
+}

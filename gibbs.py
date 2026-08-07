@@ -214,6 +214,7 @@ class gibbs_disc_spike_slab():
     
         from tqdm import tqdm
         pbar = tqdm(range(n_iter), desc="Gibbs", disable=not verbose)
+        
         for it in pbar:
             do_em = em and (em_warmup <= it < burn_in)
             self.step(gamma_seq, em=do_em, em_damping=em_damping)
