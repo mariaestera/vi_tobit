@@ -165,7 +165,23 @@ def main():
     np.save(f"{folder}/beta.npy", beta)
     np.save(f"{folder}/y_latent.npy", y_latent)
     np.save(f"{folder}/l_u_sigma.npy", np.array([l, u, sigma_y_true]))
-    
+
+    # Save all arguments (including defaults) as a copy-paste-ready command
+    flag_map = {
+        "n": "-n", "d": "-d", "X_structure": "-X_structure",
+        "k": "--k", "corr": "--corr", "intercept": "--intercept",
+        "l_perc": "-l_perc", "u_perc": "-u_perc",
+        "snr": "-snr", "tau2": "--tau2", "pi0": "--pi0",
+        "seed": "--seed", "folder": "--folder",
+    }
+    args_dict = vars(args)
+    command_parts = ["python simulate_data_script.py"]
+    for key, value in args_dict.items():
+        command_parts.append(f"{flag_map[key]} {value}")
+    command_str = " \\\n    ".join(command_parts)
+
+    with open(f"{folder}/args.txt", "w") as f:
+        f.write(command_str + "\n")
 
 if __name__ == "__main__":
     main()
