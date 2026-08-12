@@ -133,7 +133,7 @@ def main():
     #betas
     parser.add_argument("-snr", type=float, required=True, help="signal to noise ratio")
     parser.add_argument("--tau2", type=float, required=False, default = 100.0, help="variance of the true significant effects")
-    parser.add_argument("--pi0", type=float, required=False, default = 0.05, help="percentage of the true significant effects")
+    parser.add_argument("--pi0", type=float, required=False, default = 0.1, help="percentage of the true significant effects")
     
     #other settings
     parser.add_argument("--seed", type=int, required=False, default = None, help="random seed")
