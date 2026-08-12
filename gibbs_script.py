@@ -23,8 +23,7 @@ def parse_args():
     # initialization
     parser.add_argument("--tau2", type=float, required=False, default=100, help="Initial prior variance")
     parser.add_argument("--pi0", type=float, required=False, default=0.1, help="Initial prior probability of inclusion")
-    parser.add_argument("--a0", type=float, required=False, default=0.01, help="sigma^2 ~ InvGamma(a0, b0)")
-    parser.add_argument("--b0", type=float, required=False, default=0.01, help="sigma^2 ~ InvGamma(a0, b0)")
+    parser.add_argument("--eps", type=float, required=False, default=0.01, help="sigma^2 ~ InvGamma(eps, eps)")
 
     #stats
     parser.add_argument("--hdi", type=float, required=False, default=0.95, help = "Level of HDI")
@@ -204,8 +203,8 @@ def viz_beta(beta_samples, gamma_samples, beta_true, beta_cond_mean, pip,
         print("No truly nonsignificant variables in beta_true - skipping plot.")
 
 
-def viz_scalars(sigma_samples, pi0_samples, g_samples,
-                 sigma_mean, sigma_hdi, pi0_mean, pi0_hdi, g_mean, g_hdi,
+def viz_scalars(sigma_samples, pi0_samples, 
+                 sigma_mean, sigma_hdi, pi0_mean, pi0_hdi,
                  burn_in, n_iter, output_folder):
     """
     3) Histograms of the scalar parameters (sigma, pi0, g) with posterior
@@ -214,7 +213,6 @@ def viz_scalars(sigma_samples, pi0_samples, g_samples,
     params = [
         ("sigma", sigma_samples, sigma_mean, sigma_hdi, "seagreen"),
         ("pi0", pi0_samples, pi0_mean, pi0_hdi, "mediumpurple"),
-        ("g", g_samples, g_mean, g_hdi, "goldenrod"),
     ]
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
     for ax, (name, samples, mean_val, hdi_val, color) in zip(axes, params):
@@ -229,7 +227,7 @@ def viz_scalars(sigma_samples, pi0_samples, g_samples,
     plt.close(fig)
 
 
-def viz_gibbs(sigma_samples, pi0_samples, g_samples, gamma_samples,
+def viz_gibbs(sigma_samples, pi0_samples, gamma_samples,
               burn_in, n_iter, output_folder, gamma_idx=None, rng=None):
     """
     4) Trace plots (including burn-in, if available) for sigma, pi0, g,
@@ -246,7 +244,7 @@ def viz_gibbs(sigma_samples, pi0_samples, g_samples, gamma_samples,
         else:
             gamma_idx = np.arange(n_pick)
 
-    series = [("sigma", sigma_samples), ("pi0", pi0_samples), ("g", g_samples)]
+    series = [("sigma", sigma_samples), ("pi0", pi0_samples)]
     series += [(f"gamma_{j}", gamma_samples[:, j]) for j in gamma_idx]
 
     fig, axes = plt.subplots(len(series), 1, figsize=(8, 2.2 * len(series)), sharex=True)
@@ -310,91 +308,94 @@ def main():
     sigma = np.sqrt(sigma2)
 
     pi0 = args.pi0
-    g = 1.0
-
+    logit_pi0 = np.log(pi0 / (1 - pi0))
+    tau2 = args.tau2
+    
     n_saved_iter = n_iter + burn_in
 
     beta_samples = np.zeros((n_saved_iter, d))
     sigma_samples = np.zeros(n_saved_iter)
     gamma_samples = np.zeros((n_saved_iter, d), dtype=int)
     pi0_samples = np.zeros(n_saved_iter)
-    g_samples = np.zeros(n_saved_iter)
 
-    XtX = X.T @ X
-
+    XtX_diag = (X ** 2).sum(axis=0)   # x_j^T x_j for all j, precomputed once
+    
     sample_idx = 0
     pbar = tqdm(range(n_iter + burn_in), desc="Gibbs")
-
     for it in pbar:
-
         # ---- 1. Data augmentation for censored latent outcomes y*_i ----
-        y = data_aug(X, y, beta, l, u, sigma, mask_l, mask_u, rng)
+        ystar = data_aug(X, y, beta, l, u, sigma, mask_l, mask_u, rng)
 
-        # ---- 2. Collapsed, batched update of inclusion indicators gamma ----
+        # ---- 2. Batched update of inclusion indicators gamma (k << d) ----
+        eta_full = X[:, active] @ beta[active]
+
         order = rng.permutation(d)
-        active_mask = gamma.astype(bool)
         for start in range(0, d, args.gamma_bath):
             batch_idx = order[start:start + args.gamma_bath]
-            batch_mask = np.zeros(d, dtype=bool)
-            batch_mask[batch_idx] = True
-            base_idx = np.where(active_mask & ~batch_mask)[0]
 
-            rho = sample_gamma_batch(X, XtX, y, g, pi0, n, batch_idx, base_idx)
-            new_vals = (rng.random(batch_idx.size) < rho).astype(int)
-            gamma[batch_idx] = new_vals
-            active_mask[batch_idx] = new_vals.astype(bool)
+            Xb = X[:, batch_idx]
+            beta_b = beta[batch_idx]
+            gamma_b = gamma[batch_idx]
 
-        k = int(gamma.sum())
-        active_idx = np.where(gamma == 1)[0]
+            r_base = ystar - eta_full
+            linear_term = (beta_b / sigma2) * (r_base @ Xb)
+
+            active_in_batch = gamma_b == 1
+            if active_in_batch.any():
+                idx_active = batch_idx[active_in_batch]
+                beta_a = beta_b[active_in_batch]
+                linear_term[active_in_batch] += (beta_a ** 2 / sigma2) * XtX_diag[idx_active]
+
+            quad_term = (beta_b ** 2 / (2 * sigma2)) * XtX_diag[batch_idx]
+            logodds = logit_pi0 + linear_term - quad_term
+
+            p_b = expit(logodds)
+            p_b = np.clip(p_b, 1e-10, 1 - 1e-10)
+            gamma_b_new = rng.binomial(1, p_b)
+
+            if active_in_batch.any():
+                eta_full -= (Xb[:, active_in_batch] * beta_b[active_in_batch]).sum(axis=1)
+            newly_active = gamma_b_new == 1
+            if newly_active.any():
+                eta_full += (Xb[:, newly_active] * beta_b[newly_active]).sum(axis=1)
+
+            gamma[batch_idx] = gamma_b_new
+
+        k = gamma.sum()
+        active = gamma == 1
 
         # ---- 3. Inclusion probability pi0 ----
-        pi0 = rng.beta(1 + k, 399 + d - k)
+        # no prior on pi0 yet -> kept fixed
+        # pi0 = rng.beta(args.a + k, args.b + d - k)
+        # logit_pi0 = np.log(pi0 / (1 - pi0))
 
-        # ---- 4. Active coefficients, residual variance, Zellner-Siow scale g ----
-        beta = np.zeros(d)
+        # ---- 4. Effect sizes beta (active/inactive block split) ----
+        beta_new = np.zeros(d)
         if k > 0:
-            Xa = X[:, active_idx]
-            A = XtX[np.ix_(active_idx, active_idx)]
-            L, lower = cho_factor(A, lower=True)
-            L = np.tril(L)
+            X_gamma = X[:, active]
+            precision_active = (X_gamma.T @ X_gamma) / sigma2 + np.eye(k) / tau2
+            S_gamma = np.linalg.inv(precision_active)
+            S_gamma = (S_gamma + S_gamma.T) / 2
+            m_gamma = S_gamma @ (X_gamma.T @ ystar) / sigma2
+            beta_new[active] = rng.multivariate_normal(m_gamma, S_gamma)
+        if k < d:
+            beta_new[~active] = rng.normal(0, np.sqrt(tau2), d - k)
+        beta = beta_new
 
-            c = Xa.T @ y
-            beta_hat = cho_solve((L, lower), c)
-
-            term = g / (1.0 + g)
-            mean = term * beta_hat
-
-            z = rng.standard_normal(k)
-            # Cov(beta_active) = term * sigma2 * A^{-1}; A = L L^T
-            # so sampling v with Cov(v) = A^{-1} is v = L^{-T} z
-            v = solve_triangular(L.T, z, lower=False)
-            beta_active = mean + np.sqrt(term * sigma2) * v
-
-            resid = y - Xa @ beta_active
-            RSS = resid @ resid
-
-            quad = beta_active @ (A @ beta_active)
-
-            beta[active_idx] = beta_active
-        else:
-            RSS = y @ y
-            quad = 0.0
-
-        sigma2 = invgamma.rvs(args.a0 + n / 2, scale=args.b0 + RSS / 2, random_state=rng)
+        # ---- 5. Residual variance sigma2 ----
+        resid = ystar - X @ (gamma * beta)   # = y* - X_gamma @ beta_active
+        RSS = resid @ resid
+        sigma2 = invgamma.rvs(args.eps + n / 2, scale=args.eps + RSS / 2, random_state=rng)
         sigma = np.sqrt(sigma2)
 
-        g = invgamma.rvs((k + 1) / 2, scale=n / 2 + quad / (2 * sigma2), random_state=rng)
-
-        # ---- 5. Store samples ----
-
+        # ---- 6. Store samples ----
+        y = ystar
         beta_samples[sample_idx] = beta
         sigma_samples[sample_idx] = sigma
         gamma_samples[sample_idx] = gamma
         pi0_samples[sample_idx] = pi0
-        g_samples[sample_idx] = g
         sample_idx += 1
-
-        pbar.set_postfix(k=k, sigma=f"{sigma:.3f}", pi0=f"{pi0:.3f}")
+        pbar.set_postfix(k=k, mean_rho=f"{gamma.mean():.3f}", sigma=f"{sigma:.3f}")
 
     # ---- saving results ----
     output_folder = args.output_folder
@@ -404,7 +405,6 @@ def main():
         np.save(f"{output_folder}/sigma_samples.npy", sigma_samples)
         np.save(f"{output_folder}/gamma_samples.npy", gamma_samples)
         np.save(f"{output_folder}/pi0_samples.npy", pi0_samples)
-        np.save(f"{output_folder}/g_samples.npy", g_samples)
 
     #---- computing stats ----
     beta_b = beta_samples[burn_in:]
@@ -419,18 +419,13 @@ def main():
     sigma_mean = sigma_samples[burn_in:].mean()
     sigma_std = sigma_samples[burn_in:].std()
     sigma_hdi = hdi(sigma_samples[burn_in:], prob = args.hdi)
-
-    pi0 = pi0_samples[burn_in:].mean()
-    pi0_std = pi0_samples[burn_in:].std()
-    pi0_hdi = hdi(pi0_samples[burn_in:], prob = args.hdi)
-
-    g = g_samples[burn_in:].mean()
-    g_std = g_samples[burn_in:].std()
-    g_hdi = hdi(g_samples[burn_in:], prob = args.hdi)
+    
+    #pi0 = pi0_samples[burn_in:].mean()
+    #pi0_std = pi0_samples[burn_in:].std()
+    #pi0_hdi = hdi(pi0_samples[burn_in:], prob = args.hdi)
 
     sigma_ess = compute_ess(sigma_samples[burn_in:])
-    pi0_ess = compute_ess(pi0_samples[burn_in:])
-    g_ess = compute_ess(g_samples[burn_in:])
+    #pi0_ess = compute_ess(pi0_samples[burn_in:])
     beta_ess = compute_ess(beta_b)       # (d,) 
     gamma_ess = compute_ess(gamma_b.astype(float))  # (d,)
 
@@ -467,8 +462,7 @@ def main():
         writer = csv.writer(f)
         writer.writerow(["parameter", "mean", "std", "hdi_low", "hdi_high", "ess"])
         writer.writerow(["sigma", sigma_mean, sigma_std, sigma_hdi[0], sigma_hdi[1], sigma_ess])
-        writer.writerow(["pi0", pi0, pi0_std, pi0_hdi[0], pi0_hdi[1], pi0_ess])
-        writer.writerow(["g", g, g_std, g_hdi[0], g_hdi[1], g_ess])
+        #writer.writerow(["pi0", pi0, pi0_std, pi0_hdi[0], pi0_hdi[1], pi0_ess])
 
     
     # --- visualization ----
@@ -477,12 +471,15 @@ def main():
     
             viz_beta(beta_samples, gamma_samples, beta_true, beta_cond_mean, pip,
                      burn_in, n_iter, output_folder)
-    
-            viz_scalars(sigma_samples, pi0_samples, g_samples,
-                        sigma_mean, sigma_hdi, pi0, pi0_hdi, g, g_hdi,
+        
+            #tymczasowo: 
+            pi0_hdi = [0,1]
+        
+            viz_scalars(sigma_samples, pi0_samples,
+                        sigma_mean, sigma_hdi, pi0, pi0_hdi,
                         burn_in, n_iter, output_folder)
     
-            viz_gibbs(sigma_samples, pi0_samples, g_samples, gamma_samples,
+            viz_gibbs(sigma_samples, pi0_samples, gamma_samples,
                       burn_in, n_iter, output_folder, rng=rng)
 
 if __name__ == "__main__":
