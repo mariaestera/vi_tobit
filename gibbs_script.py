@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from scipy.special import expit, logit
 import arviz as az
 import pandas as pd
-
+import matplotlib.pyplot as plt
 
 
 def parse_args():
@@ -125,23 +125,19 @@ def cond_hdi(beta_samples, gamma_samples, prob=0.95):
     for j in range(d):
         mask = gamma_samples[:, j] == 1
         if mask.sum() > 1:  # potrzeba min. kilku próbek, żeby HDI miało sens
-            cond_hdi[j] = az.hdi(beta_samples[mask, j], hdi_prob=prob)
+            cond_hdi[j] = az.hdi(beta_samples[mask, j], prob=prob)
 
     return cond_hdi
 
 def hdi(samples, prob=0.95):
-
+    samples = np.asarray(samples)
+    if samples.ndim == 1:
+        return az.hdi(samples, prob=prob)
     n_iter, d = samples.shape
-
-    marg_hdi = np.full((d, 2), np.nan)
-
+    result = np.empty((d, 2))
     for j in range(d):
-        marg_hdi[j] = az.hdi(samples[:, j], hdi_prob=prob)
-
-    return marg_hdi
-
-import matplotlib.pyplot as plt
-
+        result[j] = az.hdi(samples[:, j], prob=prob)
+    return result
 
 def _post_burn(chain, burn_in, n_iter):
     """
@@ -273,31 +269,13 @@ def viz_gibbs(sigma_samples, pi0_samples, g_samples, gamma_samples,
     fig.savefig(f"{output_folder}/gibbs_traces.png", dpi=150)
     plt.close(fig)
 
-
-    # ---- visualization ----
-    if args.viz:
-        beta_true = np.load(f"{input_folder}/beta_true.npy")
-
-        viz_beta(beta_samples, gamma_samples, beta_true, beta_cond_mean, pip,
-                 burn_in, n_iter, output_folder)
-
-        viz_scalars(sigma_samples, pi0_samples, g_samples,
-                    sigma_mean, sigma_hdi, pi0, pi0_hdi, g, g_hdi,
-                    burn_in, n_iter, output_folder)
-
-        viz_gibbs(sigma_samples, pi0_samples, g_samples, gamma_samples,
-                  burn_in, n_iter, output_folder, rng=rng)
-
 def compute_ess(samples):
-    """
-    samples: 1D array (n_iter,) or 2D array (n_iter, d)
-    Returns ESS per dimension using arviz's default estimator (bulk ESS,
-    based on rank-normalized split-R-hat style autocorrelation, robust for
-    both continuous and near-degenerate/binary chains).
-    """
+    samples = np.asarray(samples)
     if samples.ndim == 1:
-        return az.ess(samples)
-    return np.array([az.ess(samples[:, j]) for j in range(samples.shape[1])])
+        # dodaj wymiar "chain" = 1
+        samples = samples[np.newaxis, :]
+        return az.ess(samples, chain_axis=0, draw_axis=1)
+    return az.ess(samples)
 
 def main():
 
@@ -370,7 +348,7 @@ def main():
         active_idx = np.where(gamma == 1)[0]
 
         # ---- 3. Inclusion probability pi0 ----
-        pi0 = rng.beta(1 + k, 1 + d - k)
+        pi0 = rng.beta(1 + k, 399 + d - k)
 
         # ---- 4. Active coefficients, residual variance, Zellner-Siow scale g ----
         beta = np.zeros(d)
@@ -421,7 +399,7 @@ def main():
     # ---- saving results ----
     output_folder = args.output_folder
 
-    if args.savechain:
+    if args.save_chain:
         np.save(f"{output_folder}/beta_samples.npy", beta_samples)
         np.save(f"{output_folder}/sigma_samples.npy", sigma_samples)
         np.save(f"{output_folder}/gamma_samples.npy", gamma_samples)
@@ -488,14 +466,14 @@ def main():
     with open(f"{output_folder}/scalar_stats.csv", "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["parameter", "mean", "std", "hdi_low", "hdi_high", "ess"])
-        writer.writerow(["sigma", sigma_mean, sigma_std, sigma_hdi[0], sigma_hdi[1]], sigma_ess)
-        writer.writerow(["pi0", pi0, pi0_std, pi0_hdi[0], pi0_hdi[1]], pi0_ess)
-        writer.writerow(["g", g, g_std, g_hdi[0], g_hdi[1]], g_ess)
+        writer.writerow(["sigma", sigma_mean, sigma_std, sigma_hdi[0], sigma_hdi[1], sigma_ess])
+        writer.writerow(["pi0", pi0, pi0_std, pi0_hdi[0], pi0_hdi[1], pi0_ess])
+        writer.writerow(["g", g, g_std, g_hdi[0], g_hdi[1], g_ess])
 
     
     # --- visualization ----
     if args.viz:
-            beta_true = np.load(f"{input_folder}/beta_true.npy")
+            beta_true = np.load(f"{input_folder}/beta.npy")
     
             viz_beta(beta_samples, gamma_samples, beta_true, beta_cond_mean, pip,
                      burn_in, n_iter, output_folder)
