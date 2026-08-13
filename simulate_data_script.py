@@ -108,6 +108,7 @@ def y_tobit(X, beta_true, l_perc, u_perc, snr, rng=np.random.default_rng(None)):
     sigma_y_true = np.sqrt(signal_var / snr)
     
     y_latent = signal + rng.normal(0, sigma_y_true, n)
+    y_latent = (y_latent - y_latent.mean()) / y_latent.std()
     l, u = np.percentile(y_latent, l_perc), np.percentile(y_latent, u_perc)
     
     return y_latent, l, u, sigma_y_true

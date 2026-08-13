@@ -124,23 +124,18 @@ class gibbs_disc_spike_slab():
         for j in self.rng.permutation(self.d):
             xj = self.X[:, j]
             beta_j = self.beta[j]
-
-            # Residual excluding variable j's current contribution
-            r_minus_j = self.ystar - eta_full + self.gamma[j] * beta_j * xj
-
+        
+            eta_minus_j = eta_full - self.gamma[j] * beta_j * xj     # eta_{-j}, poprawnie, bez y*
+            r_minus_j = self.ystar - eta_minus_j
+        
             linear_term = (beta_j / self.sigma2) * (xj @ r_minus_j)
             quad_term = (beta_j**2 / (2 * self.sigma2)) * self.XtX_diag[j]
-
             logodds = self.logit_pi0 + linear_term - quad_term
-            p_j = expit(logodds)
-            p_j = np.clip(p_j, 1e-10, 1 - 1e-10)
-
+            p_j = np.clip(expit(logodds), 1e-10, 1 - 1e-10)
+        
             gamma_j_new = self.rng.binomial(1, p_j)
 
-            # Update eta_full incrementally to reflect the new gamma_j
-            eta_full = r_minus_j - self.gamma[j] * beta_j * xj  # remove old contrib (already excluded above, safe reset)
-            eta_full = eta_full + gamma_j_new * beta_j * xj      # add new contrib
-
+            eta_full = eta_full + (gamma_j_new - self.gamma[j]) * self.beta[j] * xj 
             self.gamma[j] = gamma_j_new
 
     def update_gamma(self):
