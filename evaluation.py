@@ -421,4 +421,6 @@ def viz_gibbs(sig_true, burn_in, model_gibbs, path = None):
     
     if path:
         plt.savefig(path)
-    plt.show()
+        plt.close()
+    else:
+        plt.show()

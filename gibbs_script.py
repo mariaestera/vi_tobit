@@ -273,7 +273,8 @@ def main():
     
 
     XtX_diag = (X ** 2).sum(axis=0)   # x_j^T x_j for all j, precomputed once
-    if active.sum() > 0:
+    
+    if k > 0:
         mu = X[:, active] @ beta[active]
     else:
         mu = np.zeros(d)

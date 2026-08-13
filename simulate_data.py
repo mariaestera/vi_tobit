@@ -11,9 +11,6 @@ def X_basic(n, d, intercept=True, seed=None):
     return X
 
 
-import numpy as np
-
-
 def X_corr_blocks(n, d, k, corr, intercept=True, seed=None):
     """
     Tworzy macierz eksperymentu o wymiarach (n, d), w której kolumny
@@ -54,13 +51,15 @@ def beta_basic(d, beta_scale, seed = None):
 
     return beta_true
 
+
 def beta_sparse(d, beta_scale, perc, seed = None):
     assert perc > 0 and perc < 1
     rng = np.random.default_rng(seed)
 
     beta_raw = beta_basic(d, beta_scale, seed)
-    beta_raw *= rng.random(d) < perc
-    return beta_raw
+    indices = rng.choice([0,1], d, p = [1-perc,perc])
+
+    return beta_raw * indices
 
 
 def y_tobit(X, l_perc, u_perc, beta_true, sigma_y_true=1.0, seed=None):

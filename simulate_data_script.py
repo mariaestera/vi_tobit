@@ -2,8 +2,7 @@ import argparse
 import numpy as np
 
 
-def X_basic(n, d, intercept=True, seed=None):
-    rng = np.random.default_rng(seed)
+def X_basic(n, d, intercept=True, rng=np.random.default_rng(None)):
 
     X = rng.standard_normal((n, d))
     
@@ -12,9 +11,7 @@ def X_basic(n, d, intercept=True, seed=None):
 
     return X
 
-def X_corr_blocks(n, d, k, corr, intercept=True, seed=None):
-
-    rng = np.random.default_rng(seed)
+def X_corr_blocks(n, d, k, corr, intercept=True, rng=np.random.default_rng(None)):
 
     Sigma = np.eye(d)
 
@@ -35,8 +32,8 @@ def X_corr_blocks(n, d, k, corr, intercept=True, seed=None):
 
     return X
 
-def X_corr_diag(n, d, k, corr, intercept=True, seed=None):
-    rng = np.random.default_rng(seed)
+def X_corr_diag(n, d, k, corr, intercept=True, rng=np.random.default_rng(None)):
+
     Sigma = np.eye(d)
     for offset in range(1, k):
         idx = np.arange(d - offset)
@@ -49,9 +46,7 @@ def X_corr_diag(n, d, k, corr, intercept=True, seed=None):
     return X
 
 
-def X_ar(n, d, k, corr, intercept=False, seed=None):
-    
-    rng = np.random.default_rng(seed)
+def X_ar(n, d, k, corr, intercept=False, rng=np.random.default_rng(None)):
 
     n_blocks = int(np.ceil(d / k))
     d_padded = n_blocks * k
@@ -71,37 +66,40 @@ def X_ar(n, d, k, corr, intercept=False, seed=None):
     return X
 
 
-def X_design(n, d, struct, k =10, corr = 0.7, intercept= False, seed=None):
+def X_design(n, d, struct, k =10, corr = 0.7, intercept= False, rng=np.random.default_rng(None)):
 
     if struct == "basic":
-        return X_basic(n, d, intercept, seed)
+        return X_basic(n, d, intercept, rng)
         
     elif struct == "corr_blocks":
-        return X_corr_blocks(n, d, k, corr, intercept, seed)
+        return X_corr_blocks(n, d, k, corr, intercept, rng)
    
-    elif struct == "corr_diag":
-        return X_corr_diag(n, d, k, corr, intercept, seed)
+    elif struct == "diagonal":
+        return X_corr_diag(n, d, k, corr, intercept, rng)
 
     elif struct == "AR":
-        return X_ar(n, d, k, corr, intercept, seed)
+        return X_ar(n, d, k, corr, intercept, rng)
 
     else:
         print("Unknown type of X_design")
 
 
-def beta_sparse(d, beta_scale, perc, seed = None):
-    
-    rng = np.random.default_rng(seed)
+def beta_basic(d, beta_scale, rng=np.random.default_rng(None)):
 
-    beta = beta_scale * rng.standard_normal(d)
-    beta *= rng.random(d) < perc
-    
-    return beta
+    beta_true = beta_scale * rng.standard_normal(d)
 
+    return beta_true
 
-def y_tobit(X, beta_true, l_perc, u_perc, snr, seed=None):
+def beta_sparse(d, beta_scale, perc, rng=np.random.default_rng(None)):
+    assert perc > 0 and perc < 1
+
+    beta_raw = beta_basic(d, beta_scale, rng)
+    indices = rng.choice([0,1], d, p = [1-perc,perc])
+
+    return beta_raw * indices
+
+def y_tobit(X, beta_true, l_perc, u_perc, snr, rng=np.random.default_rng(None)):
     
-    rng = np.random.default_rng(seed)
     n, d = X.shape
     
     signal = X @ beta_true
@@ -124,7 +122,7 @@ def main():
     parser.add_argument("-X_structure", type=str, required=True, help="type of simulated X: 'basic', 'corr_blocks', 'diagonal', 'AR'")
     parser.add_argument("--k", type=int, required=False, default = 10, help="Size of correlated blocks / width of the correlated diagonal")
     parser.add_argument("--corr", type=float, required=False, default = 0.7, help="strength of correlation of predictors")
-    parser.add_argument("--intercept", type=bool, required=False, default = False, help="inclusion of the intercept: True/False")
+    parser.add_argument("--intercept", type=int, required=False, default = 0, help="inclusion of the intercept: 1 -True/0 -False")
     
     #y_censored
     parser.add_argument("-l_perc", type=float, required=True, help="lower percentile censoring threshold")
@@ -144,22 +142,25 @@ def main():
 
     assert args.X_structure in ['basic', 'corr_blocks', 'diagonal', 'AR']
     assert (args.corr <= 1) and (args.corr >= 0)
-    assert (args.snr <= 1) and (args.snr >= 0)
+    assert (args.snr > 0)
     assert (args.pi0 < 1) and (args.pi0 > 0)
     assert args.tau2 > 0
     assert args.l_perc < args.u_perc
     assert (args.l_perc >= 0) and (args.u_perc <= 100)
+    assert (args.intercept == 0) or (args.intercept == 1)
 
     n, d = args.n, args.d
     seed = args.seed
+    rng = np.random.default_rng(seed)
     folder = args.folder
+    intercept = True if args.intercept == 1 else False
     
 
-    X = X_design(n, d, args.X_structure, k = args.k, corr = args.corr, intercept=args.intercept, seed=seed)
+    X = X_design(n, d, args.X_structure, k = args.k, corr = args.corr, intercept=intercept, rng=rng)
         
-    beta = beta_sparse(d, args.tau2, args.pi0, seed = seed)
+    beta = beta_sparse(d, np.sqrt(args.tau2), args.pi0, rng)
 
-    y_latent, l, u, sigma_y_true = y_tobit(X, beta, args.l_perc, args.u_perc, args.snr, seed)
+    y_latent, l, u, sigma_y_true = y_tobit(X, beta, args.l_perc, args.u_perc, args.snr, rng)
     
     np.save(f"{folder}/X.npy", X)
     np.save(f"{folder}/beta.npy", beta)
