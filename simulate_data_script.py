@@ -137,6 +137,7 @@ def main():
     #other settings
     parser.add_argument("--seed", type=int, required=False, default = None, help="random seed")
     parser.add_argument("--folder", type=str, required=False, default = "Jupyter/vi_tobit/simulations", help="path to save results")
+    parser.add_argument("--test", type=int, required=False, default =0, help="test dataset size")
     
     
     args = parser.parse_args()
@@ -168,13 +169,24 @@ def main():
     np.save(f"{folder}/y_latent.npy", y_latent)
     np.save(f"{folder}/l_u_sigma.npy", np.array([l, u, sigma_y_true]))
 
+    if test > 0:
+        
+        rng = np.random.default_rng(2*seed)
+        
+        X = X_design(args.test, d, args.X_structure, k = args.k, corr = args.corr, intercept=intercept, rng=rng)
+        y_latent = X @ beta + rng.normal(0, sigma_y_true, args.test)
+        
+        np.save(f"{folder}/X_test.npy", X)
+        np.save(f"{folder}/y_latent_test.npy", y_latent)
+    
+
     # Save all arguments (including defaults) as a copy-paste-ready command
     flag_map = {
         "n": "-n", "d": "-d", "X_structure": "-X_structure",
         "k": "--k", "corr": "--corr", "intercept": "--intercept",
         "l_perc": "-l_perc", "u_perc": "-u_perc",
         "snr": "-snr", "tau2": "--tau2", "pi0": "--pi0",
-        "seed": "--seed", "folder": "--folder",
+        "seed": "--seed", "folder": "--folder", "--test": "test"
     }
     args_dict = vars(args)
     command_parts = ["python simulate_data_script.py"]

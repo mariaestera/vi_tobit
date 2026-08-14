@@ -473,7 +473,7 @@ def main():
     np.save(f"{output_folder}/elbo_history.npy", elbo_history)
     
     summary = model_vi.summary()
-    np.savez(f"{output_folder}/summary.npz", **summary)
+    np.savez(f"{output_folder}/vi_summary.npz", **summary)
     
     row = {
         "n": n,
@@ -489,7 +489,7 @@ def main():
         "seed": args.seed,
     }
     
-    pd.DataFrame([row]).to_csv(f"{output_folder}/time.csv", index=False)
+    pd.DataFrame([row]).to_csv(f"{output_folder}/vi_time.csv", index=False)
 
 if __name__ == "__main__":
     main()
