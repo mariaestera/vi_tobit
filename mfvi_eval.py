@@ -17,11 +17,9 @@ def mfvi_eval(summary, X_train, y_latent_train, time, args, model_name = "mfvi")
     #simulation parameters
     input_folder = args.input_folder
     output_folder = args.output_folder
-    burn_in = args.burn_in
-    n_iter = args.n_iter
 
     #data
-    n, d = X.shape
+    n, d = X_train.shape
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
 
     try:
@@ -67,7 +65,7 @@ def mfvi_eval(summary, X_train, y_latent_train, time, args, model_name = "mfvi")
         "beta_hdi_high": beta_hdi[:, 1]
     })
     
-    beta_stats_df.to_csv(f"{output_folder}/effect_sizes/{model_name}_{args.seed}_beta.csv", index=False)
+    beta_stats_df.to_csv(f"{output_folder}/{model_name}_{args.seed}_beta.csv", index=False)
 
 
     sigma_df = pd.DataFrame([{
@@ -86,8 +84,8 @@ def mfvi_eval(summary, X_train, y_latent_train, time, args, model_name = "mfvi")
     pip_tr = [0.1, 0.5, 0.9, 0.95]
 
     true_sig = (beta_true !=0).astype(int)
-    df = stats(true_sig, pip, pip_tr,
-               beta_true, beta_cond_mean,
+    df = aux_f.stats(true_sig, pip, pip_tr,
+               beta_true, beta_mean,
                X_train, y_latent_train,
                X_test, y_latent_test)
     df.to_csv(f"{output_folder}/{model_name}_stats.csv")
@@ -97,7 +95,7 @@ def mfvi_eval(summary, X_train, y_latent_train, time, args, model_name = "mfvi")
         "n": n,
         "d": d,
         "mean_sparsity": pip.mean(),
-        "n_iters": summary["n_iters",
+        "n_iters": summary["n_iters"],
         "coverged": summary["covergence"],
         "total_time": time["total"],
         "total_fit_time": time["fit"],

@@ -1,5 +1,47 @@
 import argparse
 import numpy as np
+import aux_functions as aux_f
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Simulate Tobit data. Creates disagn matrix X, dependent latent variable y^*, censored variable y. Returns all of those arrays and vector of true betas")
+
+    #X_design
+    parser.add_argument("-n", type=int, required=True, help="n smples")
+    parser.add_argument("-d", type=int, required=True, help="d dimensions")
+    parser.add_argument("-X_structure", type=str, required=True, help="type of simulated X: 'basic', 'corr_blocks', 'diagonal', 'AR'")
+    parser.add_argument("--k", type=int, required=False, default = 10, help="Size of correlated blocks / width of the correlated diagonal")
+    parser.add_argument("--corr", type=float, required=False, default = 0.7, help="strength of correlation of predictors")
+    parser.add_argument("--intercept", type=int, required=False, default = 0, help="inclusion of the intercept: 1 -True/0 -False")
+    
+    #y_censored
+    parser.add_argument("-l_perc", type=float, required=True, help="lower percentile censoring threshold")
+    parser.add_argument("-u_perc", type=float, required=True, help="upper percentile censoring threshold")
+
+    #betas
+    parser.add_argument("-snr", type=float, required=True, help="signal to noise ratio")
+    parser.add_argument("--tau2", type=float, required=False, default = 100.0, help="variance of the true significant effects")
+    parser.add_argument("--pi0", type=float, required=False, default = 0.1, help="percentage of the true significant effects")
+    
+    #other settings
+    parser.add_argument("--seed", type=int, required=False, default = None, help="random seed")
+    parser.add_argument("--input_folder", type=str, required=False, default = "Jupyter/vi_tobit/simulations", help="path to save results")
+    parser.add_argument("--output_folder", type=str, required=False,default = "Jupyter/vi_tobit/simulations", help="path to future estimates")
+    parser.add_argument("--test", type=int, required=False, default = 0, help="test dataset size")
+    
+    
+    args = parser.parse_args()
+
+    assert args.X_structure in ['basic', 'corr_blocks', 'diagonal', 'AR']
+    assert (args.corr <= 1) and (args.corr >= 0)
+    assert (args.snr > 0)
+    assert (args.pi0 < 1) and (args.pi0 > 0)
+    assert args.tau2 > 0
+    assert args.l_perc < args.u_perc
+    assert (args.l_perc >= 0) and (args.u_perc <= 100)
+    assert (args.intercept == 0) or (args.intercept == 1)
+
+    return args, parser
+
 
 
 def X_basic(n, d, intercept=True, rng=np.random.default_rng(None)):
@@ -115,46 +157,13 @@ def y_tobit(X, beta_true, l_perc, u_perc, snr, rng=np.random.default_rng(None)):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Simulate Tobit data. Creates disagn matrix X, dependent latent variable y^*, censored variable y. Returns all of those arrays and vector of true betas")
-
-    #X_design
-    parser.add_argument("-n", type=int, required=True, help="n smples")
-    parser.add_argument("-d", type=int, required=True, help="d dimensions")
-    parser.add_argument("-X_structure", type=str, required=True, help="type of simulated X: 'basic', 'corr_blocks', 'diagonal', 'AR'")
-    parser.add_argument("--k", type=int, required=False, default = 10, help="Size of correlated blocks / width of the correlated diagonal")
-    parser.add_argument("--corr", type=float, required=False, default = 0.7, help="strength of correlation of predictors")
-    parser.add_argument("--intercept", type=int, required=False, default = 0, help="inclusion of the intercept: 1 -True/0 -False")
-    
-    #y_censored
-    parser.add_argument("-l_perc", type=float, required=True, help="lower percentile censoring threshold")
-    parser.add_argument("-u_perc", type=float, required=True, help="upper percentile censoring threshold")
-
-    #betas
-    parser.add_argument("-snr", type=float, required=True, help="signal to noise ratio")
-    parser.add_argument("--tau2", type=float, required=False, default = 100.0, help="variance of the true significant effects")
-    parser.add_argument("--pi0", type=float, required=False, default = 0.1, help="percentage of the true significant effects")
-    
-    #other settings
-    parser.add_argument("--seed", type=int, required=False, default = None, help="random seed")
-    parser.add_argument("--folder", type=str, required=False, default = "Jupyter/vi_tobit/simulations", help="path to save results")
-    parser.add_argument("--test", type=int, required=False, default = 0, help="test dataset size")
-    
-    
-    args = parser.parse_args()
-
-    assert args.X_structure in ['basic', 'corr_blocks', 'diagonal', 'AR']
-    assert (args.corr <= 1) and (args.corr >= 0)
-    assert (args.snr > 0)
-    assert (args.pi0 < 1) and (args.pi0 > 0)
-    assert args.tau2 > 0
-    assert args.l_perc < args.u_perc
-    assert (args.l_perc >= 0) and (args.u_perc <= 100)
-    assert (args.intercept == 0) or (args.intercept == 1)
+    args, parser = parse_args()
+    aux_f.save_args_command(args,parser, "simulate_data_script.py")
 
     n, d = args.n, args.d
     seed = args.seed
     rng = np.random.default_rng(seed)
-    folder = args.folder
+    folder = args.input_folder
     intercept = True if args.intercept == 1 else False
     
 
@@ -169,7 +178,7 @@ def main():
     np.save(f"{folder}/y_latent.npy", y_latent)
     np.save(f"{folder}/l_u_sigma.npy", np.array([l, u, sigma_y_true]))
 
-    if test > 0:
+    if args.test > 0:
         
         rng = np.random.default_rng(2*seed)
         
@@ -179,23 +188,6 @@ def main():
         np.save(f"{folder}/X_test.npy", X)
         np.save(f"{folder}/y_latent_test.npy", y_latent)
     
-
-    # Save all arguments (including defaults) as a copy-paste-ready command
-    flag_map = {
-        "n": "-n", "d": "-d", "X_structure": "-X_structure",
-        "k": "--k", "corr": "--corr", "intercept": "--intercept",
-        "l_perc": "-l_perc", "u_perc": "-u_perc",
-        "snr": "-snr", "tau2": "--tau2", "pi0": "--pi0",
-        "seed": "--seed", "folder": "--folder", "--test": "test"
-    }
-    args_dict = vars(args)
-    command_parts = ["python simulate_data_script.py"]
-    for key, value in args_dict.items():
-        command_parts.append(f"{flag_map[key]} {value}")
-    command_str = " \\\n    ".join(command_parts)
-
-    with open(f"{folder}/args.txt", "w") as f:
-        f.write(command_str + "\n")
 
 if __name__ == "__main__":
     main()

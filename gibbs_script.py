@@ -327,7 +327,7 @@ def main():
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
     y = np.clip(ystar, l, u).copy()
 
-    y_scaled, sigma_y_scaled, l_scaled, u_scaled = aux_f.scale_y(y, l, u, sigma_y_true)
+    y_scaled, sigma_y_scaled, l_scaled, u_scaled, mu_y, sd_y, = aux_f.scale_y(y, l, u, sigma_y_true)
 
     n_iter, burn_in = args.n_iter, args.burn_in
 
@@ -358,11 +358,11 @@ def main():
 
     comput_time= {
         "total": total_time,
-        "fit": model.total_fit_time,
-        "gamma": model.gamma_fit_time
+        "fit": model_gibbs.total_fit_time,
+        "gamma": model_gibbs.gamma_fit_time
     }
     
-    gibbs_eval(samples, X, y_latent, comput_time, args)
+    gibbs_eval(samples, X, ystar, comput_time, args)
 
 if __name__ == "__main__":
     main()

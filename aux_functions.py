@@ -27,7 +27,7 @@ def save_args_command(args, parser, script_name):
         command_parts.append(f"{flag} {value}")
 
     command_str = " \\\n    ".join(command_parts)
-    with open(f"{args.output_folder}/args.txt", "w") as f:
+    with open(f"{args.output_folder}/{script_name}-args.txt", "w") as f:
         f.write(command_str + "\n")
 
 
@@ -40,7 +40,7 @@ def scale_y(y, l, u, sigma_y_true):
     
     sigma_y_scaled = sigma_y_true / sd_y
 
-    return y_scaled, sigma_y_scaled, l_scaled, u_scaled
+    return y_scaled, sigma_y_scaled, l_scaled, u_scaled, mu_y, sd_y
 
 def intercept_idx(X):
     ones_cols = np.where(np.all(X == 1, axis=0))[0]
@@ -101,10 +101,10 @@ def stats(true_sig, pip, pip_tr,
         beta_masked = np.where(pred_sig, beta_est, 0.0)
 
         y_pred_train = X_train @ beta_masked
-        y_pred_test = X_test @ beta_masked if X_test else np.nan
+        y_pred_test = X_test @ beta_masked if X_test is not None else np.nan
 
         r2_train = r2_score(y_latent_train, y_pred_train) 
-        r2_test = r2_score(y_latent_test, y_pred_test) if X_test else np.nan
+        r2_test = r2_score(y_latent_test, y_pred_test) if X_test is not None else np.nan
 
         rows.append({
             "pip_tr": tr,

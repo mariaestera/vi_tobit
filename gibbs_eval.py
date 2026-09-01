@@ -47,7 +47,7 @@ def compute_ess(samples):
 
 
 
-def gibbs_eval(samples_orig, X_train, y_latent_train, time, args, model_name = "gibbs"):
+def gibbs_eval(samples, X_train, y_latent_train, time, args, model_name = "gibbs"):
 
     #simulation parameters
   
@@ -57,7 +57,7 @@ def gibbs_eval(samples_orig, X_train, y_latent_train, time, args, model_name = "
     n_iter = args.n_iter
 
     #data
-    n, d = X.shape
+    n, d = X_train.shape
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
 
     try:
@@ -112,7 +112,7 @@ def gibbs_eval(samples_orig, X_train, y_latent_train, time, args, model_name = "
         "ess": beta_ess,
     })
     
-    beta_stats_df.to_csv(f"{output_folder}/effect_sizes/{model_name}_{args.seed}_beta.csv", index=False)
+    beta_stats_df.to_csv(f"{output_folder}/{model_name}_{args.seed}_beta.csv", index=False)
 
 
     sigma_df = pd.DataFrame([{

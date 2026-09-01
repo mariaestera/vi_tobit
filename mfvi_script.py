@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import time
 from tqdm.auto import tqdm
 import aux_functions as aux_f
+from mfvi_eval import mfvi_eval
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Estimate effect sizes using Gibbs sampler")
@@ -24,6 +25,9 @@ def parse_args():
     parser.add_argument("--tau2", type=float, required=False, default=100, help="Initial prior variance")
     parser.add_argument("--pi0", type=float, required=False, default=0.1, help="Initial prior probability of inclusion")
     parser.add_argument("--eps", type=float, required=False, default=0.01, help="sigma^2 ~ InvGamma(eps, eps)")
+
+    #stats
+    parser.add_argument("--hdi", type=float, required=False, default=0.95, help = "Level of HDI")
 
     # other settings
     parser.add_argument("--seed", type=int, required=False, default=None, help = "random seed")
@@ -439,7 +443,7 @@ def summary_orig(summary, mu_y, sd_y, intercept_idx=None):
         "a": a_orig,
         "b": b_orig,
         "E_sigma2": E_sigma2_orig,
-        "n_iters": len(model.elbo_history),
+        "n_iters": summary["n_iters"],
         "covergence": summary["covergence"],
     }
 
@@ -460,7 +464,7 @@ def main():
     y = np.clip(ystar, l, u).copy()
 
 
-    y_scaled, sigma_y_scaled, l_scaled, u_scaled = aux_f.scale_y(y, l, u, sigma_y_true)
+    y_scaled, sigma_y_scaled, l_scaled, u_scaled, mu_y, sd_y = aux_f.scale_y(y, l, u, sigma_y_true)
 
     start = time.perf_counter()
     
@@ -483,15 +487,16 @@ def main():
     total_time = start - time.perf_counter()
 
     summary = model_vi.summary()
-    summary = summary_orig(summary)
+    summary["n_iters"] = len(model_vi.elbo_history)
+    summary = summary_orig(summary, mu_y, sd_y, aux_f.intercept_idx(X))
 
     comput_time= {
         "total": total_time,
-        "fit": model.total_fit_time,
-        "gamma": model.gamma_fit_time
+        "fit": model_vi.total_fit_time,
+        "gamma": model_vi.gamma_fit_time
     }
     
-    mfvi_eval(summary, X, y_latent, comput_time, args)
+    mfvi_eval(summary, X, ystar, comput_time, args)
 
 if __name__ == "__main__":
     main()
