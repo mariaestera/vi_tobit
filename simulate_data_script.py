@@ -137,7 +137,7 @@ def main():
     #other settings
     parser.add_argument("--seed", type=int, required=False, default = None, help="random seed")
     parser.add_argument("--folder", type=str, required=False, default = "Jupyter/vi_tobit/simulations", help="path to save results")
-    parser.add_argument("--test", type=int, required=False, default =0, help="test dataset size")
+    parser.add_argument("--test", type=int, required=False, default = 0, help="test dataset size")
     
     
     args = parser.parse_args()

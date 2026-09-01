@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import time
 from tqdm.auto import tqdm
-
+import aux_functions as aux_f
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Estimate effect sizes using Gibbs sampler")
@@ -30,24 +30,6 @@ def parse_args():
 
     args = parser.parse_args()
     return args, parser
-
-def save_args_command(args, parser, script_name="gibbs_script.py"):
-    """Save all arguments (including defaults) as a copy-paste-ready command."""
-    args_dict = vars(args)
-    command_parts = [f"python {script_name}"]
-
-    for action in parser._actions:
-        if action.dest == "help" or action.dest not in args_dict:
-            continue
-        flag = action.option_strings[0]  # pierwsza forma flagi, np. "-input_folder" lub "--tau2"
-        value = args_dict[action.dest]
-        if value is None:
-            continue
-        command_parts.append(f"{flag} {value}")
-
-    command_str = " \\\n    ".join(command_parts)
-    with open(f"{args.output_folder}/args.txt", "w") as f:
-        f.write(command_str + "\n")
         
 def inv_mills_ratio(z, upper=False):
     if upper:
@@ -73,7 +55,7 @@ class SparseTobitVI:
     delta, eps - prior parameters InvGamma(delta, eps) on sigma^2
     """
 
-    def __init__(self, X, y, l=None, u=None, tau2=25.0, pi0=0.1,
+    def __init__(self, X, y, l=None, u=None, tau2=4.0, pi0=0.1,
                  delta=0.01, eps=0.01, seed=None):
         self.X = X
         self.y = np.asarray(y, dtype=float)
@@ -104,11 +86,13 @@ class SparseTobitVI:
 
         self._init_params()
         self.elbo_history = []
+        self.covergence = None
 
         self.total_fit_time = 0
         self.beta_fit_time = 0
         self.gamma_fit_time = 0
         self.ystar_fit_time = 0
+        
 
     # ------------------------------------------------------------------
     def _init_params(self):
@@ -409,9 +393,11 @@ class SparseTobitVI:
             
             if it > em_warmup:
                 if abs(self.elbo_history[it] - self.elbo_history[it-1]) < tol:
+                    self.covergence = True
                     print("Early stopping")
                     break
         else:
+            self.covergence = False
             print("ELBO didn't converge")
 
         self.total_fit_time = time.perf_counter() - start
@@ -431,13 +417,37 @@ class SparseTobitVI:
             "a": self.a,
             "b": self.b,
             "E_sigma2": self.b / (self.a - 1) if self.a > 1 else np.nan,
+            "covergence": self.covergence
         }
 
-    
+        
+def summary_orig(summary, mu_y, sd_y, intercept_idx=None):
+    m_orig = summary["m"].copy() * sd_y
+    S_diag_orig = summary["S_diag"].copy() * sd_y**2 
+
+    if intercept_idx is not None:
+        m_orig[intercept_idx] += mu_y
+        
+    a_orig = summary["a"]
+    b_orig = summary["b"] * sd_y**2
+    E_sigma2_orig = b_orig / (a_orig - 1) if a_orig > 1 else np.nan
+
+    return {
+        "rho": summary["rho"].copy(),
+        "m": m_orig,
+        "S_diag": S_diag_orig,
+        "a": a_orig,
+        "b": b_orig,
+        "E_sigma2": E_sigma2_orig,
+        "n_iters": len(model.elbo_history),
+        "covergence": summary["covergence"],
+    }
+
+
 def main():
     
     args, parser = parse_args()
-    save_args_command(args,parser)
+    aux_f.save_args_command(args,parser, "mfvi_script.py")
 
     # loading data
     input_folder = args.input_folder
@@ -449,18 +459,19 @@ def main():
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
     y = np.clip(ystar, l, u).copy()
 
+
+    y_scaled, sigma_y_scaled, l_scaled, u_scaled = aux_f.scale_y(y, l, u, sigma_y_true)
+
     start = time.perf_counter()
     
     model_vi = SparseTobitVI(
-        X, y,
+        X, y_scaled,
         tau2= args.tau2,
         pi0= args.pi0, 
         seed= args.seed,
         delta=args.eps, 
         eps=args.eps
     )
-
-    time_init = time.perf_counter() - start
     
     model_vi.fit(
         n_iter = args.n_iter, 
@@ -469,27 +480,18 @@ def main():
         tol = args.tol
     )
 
-    elbo_history = np.array(model_vi.elbo_history)
-    np.save(f"{output_folder}/elbo_history.npy", elbo_history)
-    
+    total_time = start - time.perf_counter()
+
     summary = model_vi.summary()
-    np.savez(f"{output_folder}/vi_summary.npz", **summary)
-    
-    row = {
-        "n": n,
-        "d": d,
-        "mean_sparsity": model_vi.rho.mean(),
-        "init_time": time_init,
-        "total_fit_time": model_vi.total_fit_time,
-        "n_iters": len(model_vi.elbo_history),
-        "ystar_fit_time": model_vi.ystar_fit_time,
-        "gamma_fit_time": model_vi.gamma_fit_time,
-        "gamma_batch_size": args.gamma_batch,
-        "beta_fit_time": model_vi.beta_fit_time,
-        "seed": args.seed,
+    summary = summary_orig(summary)
+
+    comput_time= {
+        "total": total_time,
+        "fit": model.total_fit_time,
+        "gamma": model.gamma_fit_time
     }
     
-    pd.DataFrame([row]).to_csv(f"{output_folder}/vi_time.csv", index=False)
+    mfvi_eval(summary, X, y_latent, comput_time, args)
 
 if __name__ == "__main__":
     main()

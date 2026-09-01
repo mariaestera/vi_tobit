@@ -38,7 +38,7 @@ def parse_args():
     return args, parser
 
 
-class SparseTobitGibbs():
+class SparseOLSGibbs():
     """
     Gibbs sampler for Tobit regression with a discrete spike-and-slab prior
     on beta, via variable-inclusion indicators gamma.
@@ -52,7 +52,7 @@ class SparseTobitGibbs():
         
     """
 
-    def __init__(self, X, y, l=None, u=None, tau2=25.0, pi0=0.1,
+    def __init__(self, X, y, tau2=4.0, pi0=0.1,
                  delta=0.01, eps=0.01, seed=None):
         self.X = X
         self.y = np.asarray(y, dtype=float)
@@ -64,15 +64,7 @@ class SparseTobitGibbs():
         self.logit_pi0 = logit(pi0)
         self.delta = delta
         self.eps = eps
-        # Censorship thresholds
-        if l is None:
-            l = np.min(self.y) if (self.y == np.min(self.y)).sum() > 5 else -np.inf
-        if u is None:
-            u = np.max(self.y) if (self.y == np.max(self.y)).sum() > 5 else np.inf
-        self.l, self.u = l, u
-        self.mask_l = (self.y == l)
-        self.mask_u = (self.y == u)
-        self.mask_mid = ~(self.mask_l | self.mask_u)
+
         # other quantities
         self.XtX_diag = np.sum(X**2, axis=0)
         self._init_params()
@@ -83,7 +75,6 @@ class SparseTobitGibbs():
         self.total_fit_time = 0
         self.beta_fit_time = 0
         self.gamma_fit_time = 0
-        self.ystar_fit_time = 0
 
     # ------------------------------------------------------------------
     def _init_params(self):
@@ -94,41 +85,7 @@ class SparseTobitGibbs():
         self.beta = self.rng.normal(0, np.sqrt(self.tau2), d)
         self.sigma2 = np.var(self.y)
 
-        self.ystar = np.empty(n, dtype=float)
-        self.ystar[self.mask_mid] = self.y[self.mask_mid]
-        self.ystar[self.mask_l] = self.l
-        self.ystar[self.mask_u] = self.u
-
-    # ------------------------------------------------------------------
-    def update_ystar(self):
-        """
-        Sample latent y* for censored observations from the appropriate
-        truncated normal, conditional on current beta, gamma, sigma2.
-        Observations in (l, u) are fixed at their observed value (not latent).
-        """
-        eta = self.X[:,self.active] @ self.beta[self.active]
-        sigma = np.sqrt(self.sigma2)
-
-        # Lower-censored: y*_i <= l
-        if self.mask_l.any():
-            idx = self.mask_l
-            a = (-np.inf - eta[idx]) / sigma  # = -inf
-            b = (self.l - eta[idx]) / sigma
-            self.ystar[idx] = truncnorm.rvs(
-                a, b, loc=eta[idx], scale=sigma, random_state=self.rng
-            )
-
-        # Upper-censored: y*_i >= u
-        if self.mask_u.any():
-            idx = self.mask_u
-            a = (self.u - eta[idx]) / sigma
-            b = (np.inf - eta[idx]) / sigma  # = inf
-            self.ystar[idx] = truncnorm.rvs(
-                a, b, loc=eta[idx], scale=sigma, random_state=self.rng
-            )
-
-        # Uncensored observations remain fixed at y_i
-        self.ystar[self.mask_mid] = self.y[self.mask_mid]
+        self.ystar = self.y 
 
     # ------------------------------------------------------------------
     def update_beta(self):
@@ -259,10 +216,6 @@ class SparseTobitGibbs():
         optionally followed by an EM step updating tau2 and pi0."""
 
         start = time.perf_counter()
-        self.update_ystar()
-        self.ystar_fit_time += time.perf_counter() - start
-
-        start = time.perf_counter()
         self.update_gamma(gamma_batch_size)
         self.gamma_fit_time += time.perf_counter() - start
 
@@ -314,9 +267,9 @@ def samples_orig(samples, mu_y, sd_y, intercept_idx):
     return samples
     
 def main():
-
+    
     args, parser = parse_args()
-    aux_f.save_args_command(args,parser, "gibbs_script.py")
+    aux_f.save_args_command(args,parser, "mfvi_script.py")
 
     # loading data
     input_folder = args.input_folder
@@ -333,14 +286,14 @@ def main():
 
     total_time = time.perf_counter()
     
-    model_gibbs = SparseTobitGibbs(
+    model_ols = SparseOLSGibbs(
         X, y_scaled,
         tau2 = args.tau2,
         pi0 = args.pi0,
         seed = args.seed,
     )
 
-    beta_samples, gamma_samples, sigma_samples = model_gibbs.fit(
+    beta_samples, gamma_samples, sigma_samples = model_ols.fit(
         n_iter = burn_in + n_iter, 
         burn_in = 0, 
         gamma_batch_size = args.gamma_batch
@@ -354,7 +307,7 @@ def main():
         "sigma": sigma_samples
     }
 
-    samples = samples_orig(samples, mu_y, sd_y, aux_f.intercept_idx(X))
+    samples_orig = samples_orig(samples, mu_y, sd_y, intercept_idx(X))
 
     comput_time= {
         "total": total_time,
@@ -362,7 +315,7 @@ def main():
         "gamma": model.gamma_fit_time
     }
     
-    gibbs_eval(samples, X, y_latent, comput_time, args)
+    gibbs_eval(samples_orig, X, y_latent, time, args, model_name = "ols")
 
 if __name__ == "__main__":
     main()
