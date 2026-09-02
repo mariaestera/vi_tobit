@@ -17,7 +17,7 @@ def parse_args():
 
     # sampler params
     parser.add_argument("--n_iter", type=int, required=False, default = 1000, help="maximum number of CAVI full iterations after EM warmup")
-    parser.add_argument("--em-warm_up", type=int, required=False, default = 50, help= "number of initial iterations without update hyperparams")
+    parser.add_argument("--em-warm_up", type=int, required=False, default = 100, help= "number of initial iterations without update hyperparams")
     parser.add_argument("--gamma_batch", type=int, required=False, default=-1, help="number of the gamma_i updated together; -1 - fully parralel update")
     parser.add_argument("--tol", type=float, required=False, default = 0.01, help="treshold for ELBO divergence")
 
@@ -213,7 +213,8 @@ class SparseTobitVI:
             rho_j_new = np.clip(rho_j_new, 1e-10, 1 - 1e-10)
     
             # Update eta incrementally to reflect the new rho_j
-            self.eta = resid_j - self.rho[j] * self.m[j] * xj + rho_j_new * self.m[j] * xj
+            #self.eta = resid_j - self.rho[j] * self.m[j] * xj + rho_j_new * self.m[j] * xj
+            self.eta = self.eta - self.rho[j] * self.m[j] * xj + rho_j_new * self.m[j] * xj
     
             self.rho[j] = rho_j_new
     
@@ -269,9 +270,10 @@ class SparseTobitVI:
         )
     
         # E_q[log p(y* | beta, sigma^2)]
+
         q_y_star = (
             -self.n / 2 * np.log(2 * np.pi)
-            - 0.5 * (
+            - self.n / 2 * (
                 np.log(self.b) - digamma(self.a)
             )
             - self.a / (2 * self.b) * (

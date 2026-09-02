@@ -150,7 +150,7 @@ def y_tobit(X, beta_true, l_perc, u_perc, snr, rng=np.random.default_rng(None)):
     sigma_y_true = np.sqrt(signal_var / snr)
     
     y_latent = signal + rng.normal(0, sigma_y_true, n)
-    y_latent = (y_latent - y_latent.mean()) / y_latent.std()
+
     l, u = np.percentile(y_latent, l_perc), np.percentile(y_latent, u_perc)
     
     return y_latent, l, u, sigma_y_true
@@ -168,8 +168,10 @@ def main():
     
 
     X = X_design(n, d, args.X_structure, k = args.k, corr = args.corr, intercept=intercept, rng=rng)
-        
-    beta = beta_sparse(d, np.sqrt(args.tau2), args.pi0, rng)
+
+    n, d_total = X.shape 
+    
+    beta = beta_sparse(d_total, np.sqrt(args.tau2), args.pi0, rng)
 
     y_latent, l, u, sigma_y_true = y_tobit(X, beta, args.l_perc, args.u_perc, args.snr, rng)
     

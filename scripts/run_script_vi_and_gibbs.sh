@@ -19,23 +19,24 @@ pip install arviz
 # print the start time
 date
 
-seed=23
-scenario_name="scenario_2"
+seed=22
+scenario_name="scenario_1"
 input_folder="Jupyter/vi_tobit/simulations/X_design/${scenario_name}_${seed}"
 output_folder="Jupyter/vi_tobit/simulations/${scenario_name}/${seed}"
 mkdir -p "$input_folder"
 mkdir -p "$output_folder"
 
 srun python Jupyter/vi_tobit/simulate_data_script.py \
-    -n 2000 \
-    -d 1000 \
+    -n 1000 \
+    -d 500 \
     -X_structure corr_blocks \
-    --k 25 \
-    --corr 0.9 \
+    --intercept 1 \
+    --k 10 \
+    --corr 0.7 \
     -l_perc 20 \
     -u_perc 80 \
-    -snr 0.5 \
-    --pi0 0.1 \
+    -snr 0.4 \
+    --pi0 0.05 \
     --tau2 10 \
     --input_folder "$input_folder" \
     --output_folder "$output_folder" \
@@ -45,17 +46,17 @@ srun python Jupyter/vi_tobit/simulate_data_script.py \
 srun python Jupyter/vi_tobit/mfvi_script.py \
     -input_folder "$input_folder"\
     -output_folder "$output_folder"\
-    --pi0 0.1 \
-    --tau2 4 \
+    --pi0 0.01 \
+    --tau2 1 \
     --seed $seed \
-    --gamma_batch 10
+    --gamma_batch 1 \
 
 srun python Jupyter/vi_tobit/gibbs_script.py \
     -input_folder "$input_folder"\
     -output_folder "$output_folder"\
     -n_iter 2500 \
     -burn_in 1000 \
-    --pi0 0.1 \
-    --tau2 4 \
+    --pi0 0.01 \
+    --tau2 1 \
     --seed $seed \
-    --gamma_batch 10
+    --gamma_batch 1
