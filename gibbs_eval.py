@@ -129,7 +129,7 @@ def gibbs_eval(samples, X_train, y_latent_train, time, args, model_name = "gibbs
 
 
     # --- stats -------------------------------------------------------------------
-    pip_tr = [0.1, 0.5, 0.9, 0.95]
+    pip_tr = [0.1, 0.5, 0.9, 0.95, 0.99]
 
     true_sig = (beta_true !=0).astype(int)
     df = aux_f.stats(true_sig, pip, pip_tr,

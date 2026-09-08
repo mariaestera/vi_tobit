@@ -1,6 +1,8 @@
 import argparse
 import numpy as np
 import aux_functions as aux_f
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Simulate Tobit data. Creates disagn matrix X, dependent latent variable y^*, censored variable y. Returns all of those arrays and vector of true betas")
@@ -11,7 +13,7 @@ def parse_args():
     parser.add_argument("-X_structure", type=str, required=True, help="type of simulated X: 'basic', 'corr_blocks', 'diagonal', 'AR'")
     parser.add_argument("--k", type=int, required=False, default = 10, help="Size of correlated blocks / width of the correlated diagonal")
     parser.add_argument("--corr", type=float, required=False, default = 0.7, help="strength of correlation of predictors")
-    parser.add_argument("--intercept", type=int, required=False, default = 0, help="inclusion of the intercept: 1 -True/0 -False")
+    parser.add_argument("--intercept", type=int, required=False, default = 1, help="inclusion of the intercept: 1 -True/0 -False")
     
     #y_censored
     parser.add_argument("-l_perc", type=float, required=True, help="lower percentile censoring threshold")
@@ -155,19 +157,43 @@ def y_tobit(X, beta_true, l_perc, u_perc, snr, rng=np.random.default_rng(None)):
     
     return y_latent, l, u, sigma_y_true
 
+def estimate_blocks(X, tol=1e-8):
+
+    norms = np.linalg.norm(X, axis=0)
+    norms[norms == 0] = 1.0  # avoid division by zero for all-zero columns
+    X_normalized = X / norms
+
+    G = X_normalized.T @ X_normalized
+    adjacency = csr_matrix(np.abs(G) > tol)
+
+    n_components, labels = connected_components(
+        adjacency, directed=False, connection="weak"
+    )
+
+    beta_blocks = np.empty_like(labels)
+    seen = {}
+    next_id = 0
+    for j, lbl in enumerate(labels):
+        if lbl not in seen:
+            seen[lbl] = next_id
+            next_id += 1
+        beta_blocks[j] = seen[lbl]
+
+    return beta_blocks
 
 def main():
     args, parser = parse_args()
     aux_f.save_args_command(args,parser, "simulate_data_script.py")
 
     n, d = args.n, args.d
+    k = args.k
     seed = args.seed
     rng = np.random.default_rng(seed)
     folder = args.input_folder
     intercept = True if args.intercept == 1 else False
     
 
-    X = X_design(n, d, args.X_structure, k = args.k, corr = args.corr, intercept=intercept, rng=rng)
+    X = X_design(n, d, args.X_structure, k = k, corr = args.corr, intercept=intercept, rng=rng)
 
     n, d_total = X.shape 
     
@@ -180,6 +206,20 @@ def main():
     np.save(f"{folder}/y_latent.npy", y_latent)
     np.save(f"{folder}/l_u_sigma.npy", np.array([l, u, sigma_y_true]))
 
+    if args.X_structure == 'basic':
+        beta_blocks = np.zeros(d, dtype=int)
+        
+    elif args.X_structure in ['corr_blocks', 'AR']:
+        if k< d/2:
+            beta_blocks = np.concatenate([[0], 1 + np.arange(d) // k]) if intercept else np.arange(d) // k
+        else:
+            beta_blocks = estimate_blocks(X, tol=0.5)
+    else:
+        print("Unknown X_design type")
+
+    np.save(f"{folder}/beta_blocks.npy", beta_blocks)
+
+    
     if args.test > 0:
         
         rng = np.random.default_rng(2*seed)

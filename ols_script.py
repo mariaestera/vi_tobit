@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import time
 from gibbs_eval import gibbs_eval
 import aux_functions as aux_f
+from gibbs_script import samples_orig
 
 
 def parse_args():
@@ -235,7 +236,7 @@ class SparseOLSGibbs():
         start = time.perf_counter()
     
         from tqdm import tqdm
-        pbar = tqdm(range(n_iter), desc="Gibbs", disable=not verbose)
+        pbar = tqdm(range(n_iter), desc="OLS", disable=not verbose)
         
         for it in pbar:
             self.step(gamma_batch_size)
@@ -247,29 +248,11 @@ class SparseOLSGibbs():
         self.total_fit_time = time.perf_counter() - start
         
         return beta_samples, gamma_samples, sigma_samples
-
-
-def samples_orig(samples, mu_y, sd_y, intercept_idx):
-    
-    beta_samples_orig = samples["beta"] * sd_y
-    
-    if intercept_idx is not None:
-        beta_samples_orig[:, intercept_idx] += mu_y
-        
-    sigma_samples_orig = samples["sigma"] * sd_y
-
-    samples = {
-        "beta": beta_samples_orig,
-        "gamma": samples["gamma"],
-        "sigma": sigma_samples_orig
-    }
-
-    return samples
     
 def main():
     
     args, parser = parse_args()
-    aux_f.save_args_command(args,parser, "mfvi_script.py")
+    aux_f.save_args_command(args,parser, "ols_script.py")
 
     # loading data
     input_folder = args.input_folder
@@ -280,7 +263,7 @@ def main():
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
     y = np.clip(ystar, l, u).copy()
 
-    y_scaled, sigma_y_scaled, l_scaled, u_scaled = aux_f.scale_y(y, l, u, sigma_y_true)
+    y_scaled, sigma_y_scaled, l_scaled, u_scaled, mu_y, sd_y = aux_f.scale_y(y, l, u, sigma_y_true)
 
     n_iter, burn_in = args.n_iter, args.burn_in
 
@@ -307,15 +290,15 @@ def main():
         "sigma": sigma_samples
     }
 
-    samples_orig = samples_orig(samples, mu_y, sd_y, intercept_idx(X))
+    samples = samples_orig(samples, mu_y, sd_y, aux_f.intercept_idx(X))
 
     comput_time= {
         "total": total_time,
-        "fit": model.total_fit_time,
-        "gamma": model.gamma_fit_time
+        "fit": model_ols.total_fit_time,
+        "gamma": model_ols.gamma_fit_time
     }
     
-    gibbs_eval(samples_orig, X, y_latent, time, args, model_name = "ols")
+    gibbs_eval(samples, X, ystar, comput_time, args, model_name = "ols")
 
 if __name__ == "__main__":
     main()

@@ -32,7 +32,9 @@ def save_args_command(args, parser, script_name):
 
 
 def scale_y(y, l, u, sigma_y_true):
-    mu_y, sd_y = y.mean(), y.std()
+    
+    uncensored = (y > l) & (y < u)
+    mu_y, sd_y = y[uncensored].mean(), y[uncensored].std()
     
     y_scaled = (y - mu_y) / sd_y
     l_scaled = (l - mu_y) / sd_y
