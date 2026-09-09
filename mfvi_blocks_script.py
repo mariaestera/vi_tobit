@@ -452,6 +452,7 @@ class SparseTobitStructuredVI:
         
         for it in pbar:
             self.step(it, em_warmup, damping, gamma_batch_size)
+            pbar.set_postfix(elbo=f"{self.elbo_history[it]:.4f}")
             
             if it > em_warmup:
                 if abs(self.elbo_history[it] - self.elbo_history[it-1]) < tol:
