@@ -21,7 +21,6 @@ def parse_args():
 
     #betas
     parser.add_argument("-snr", type=float, required=True, help="signal to noise ratio")
-    parser.add_argument("--tau2", type=float, required=False, default = 100.0, help="variance of the true significant effects")
     parser.add_argument("--pi0", type=float, required=False, default = 0.1, help="percentage of the true significant effects")
     
     #other settings
@@ -37,7 +36,6 @@ def parse_args():
     assert (args.corr <= 1) and (args.corr >= 0)
     assert (args.snr > 0)
     assert (args.pi0 < 1) and (args.pi0 > 0)
-    assert args.tau2 > 0
     assert args.l_perc < args.u_perc
     assert (args.l_perc >= 0) and (args.u_perc <= 100)
     assert (args.intercept == 0) or (args.intercept == 1)
@@ -128,34 +126,47 @@ def X_design(n, d, struct, k =10, corr = 0.7, intercept= False, rng=np.random.de
         print("Unknown type of X_design")
 
 
-def beta_basic(d, beta_scale, rng=np.random.default_rng(None)):
+def spike_and_slab(d, pi0, mean =0, scale =1, rng = None):
 
-    beta_true = beta_scale * rng.standard_normal(d)
+    if rng is None:
+        rng = np.random.default_rng()
 
-    return beta_true
+    return rng.normal(mean, scale, d) * (rng.uniform(0, 1,d) < pi0).astype(int)
 
-def beta_sparse(d, beta_scale, perc, rng=np.random.default_rng(None)):
-    assert perc > 0 and perc < 1
 
-    beta_raw = beta_basic(d, beta_scale, rng)
-    indices = rng.choice([0,1], d, p = [1-perc,perc])
+def beta_sparse(d, X, pi0, snr, rng=None):
+    # X: raw (standardized) design matrix (n x d); R = X^T X / n is the correlation matrix
+    if rng is None:
+        rng = np.random.default_rng()
 
-    return beta_raw * indices
+    beta_raw = spike_and_slab(d, pi0, rng=rng)
 
-def y_tobit(X, beta_true, l_perc, u_perc, snr, rng=np.random.default_rng(None)):
+    h2 = snr / (snr + 1)
+
+    has_intercept = np.all(X[:, 0] == 1)
+    X_signal = X[:, 1:] if has_intercept else X
+    
+    Xb = X_signal @ beta_raw
+    v = (Xb @ Xb) / X.shape[0]
+
+    beta = np.sqrt(h2 / v) * beta_raw
+
+    return beta, 1 - h2
+
+def y_tobit(X, beta, l_perc, u_perc, noise_var, rng=None):
+
+    if rng is None:
+        rng = np.random.default_rng()
     
     n, d = X.shape
     
-    signal = X @ beta_true
-    signal_var = np.var(signal)
-
-    sigma_y_true = np.sqrt(signal_var / snr)
+    signal = X @ beta
     
-    y_latent = signal + rng.normal(0, sigma_y_true, n)
+    y_latent = signal + rng.normal(0, np.sqrt(noise_var), n)
 
     l, u = np.percentile(y_latent, l_perc), np.percentile(y_latent, u_perc)
     
-    return y_latent, l, u, sigma_y_true
+    return y_latent, l, u
 
 def estimate_blocks(X, tol=1e-8):
 
@@ -197,14 +208,17 @@ def main():
 
     n, d_total = X.shape 
     
-    beta = beta_sparse(d_total, np.sqrt(args.tau2), args.pi0, rng)
-
-    y_latent, l, u, sigma_y_true = y_tobit(X, beta, args.l_perc, args.u_perc, args.snr, rng)
+    beta, noise_var = beta_sparse(d, X, args.pi0, args.snr, rng=rng)
+    
+    if intercept:
+        beta = np.concatenate([[0], beta])
+        
+    y_latent, l, u = y_tobit(X, beta, args.l_perc, args.u_perc, noise_var, rng)
     
     np.save(f"{folder}/X.npy", X)
     np.save(f"{folder}/beta.npy", beta)
     np.save(f"{folder}/y_latent.npy", y_latent)
-    np.save(f"{folder}/l_u_sigma.npy", np.array([l, u, sigma_y_true]))
+    np.save(f"{folder}/l_u_sigma.npy", np.array([l, u, np.sqrt(noise_var)]))
 
     if args.X_structure == 'basic':
         beta_blocks = np.zeros(d, dtype=int)
@@ -225,7 +239,7 @@ def main():
         rng = np.random.default_rng(2*seed)
         
         X = X_design(args.test, d, args.X_structure, k = args.k, corr = args.corr, intercept=intercept, rng=rng)
-        y_latent = X @ beta + rng.normal(0, sigma_y_true, args.test)
+        y_latent = X @ beta + rng.normal(0, np.sqrt(noise_var), args.test)
         
         np.save(f"{folder}/X_test.npy", X)
         np.save(f"{folder}/y_latent_test.npy", y_latent)

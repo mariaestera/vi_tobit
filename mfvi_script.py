@@ -388,7 +388,7 @@ class SparseTobitVI:
             self.update_tau2(damping)
             self.update_pi0(damping)
 
-    def fit(self, n_iter=1000, em_warmup=50, damping=0.3, tol=0.01, gamma_batch_size=-1, verbose=True):
+    def fit(self, n_iter=1000, em_warmup=50, damping=0.3, tol = 1e-5, gamma_batch_size=-1, verbose=True):
 
         start = time.perf_counter()
         
@@ -396,9 +396,12 @@ class SparseTobitVI:
         
         for it in pbar:
             self.step(it, em_warmup, damping, gamma_batch_size)
+            pbar.set_postfix(elbo=f"{self.elbo_history[it]:.4f}")
             
             if it > em_warmup:
-                if abs(self.elbo_history[it] - self.elbo_history[it-1]) < tol:
+
+                rel_change = abs(self.elbo_history[it] - self.elbo_history[it-1]) / abs(self.elbo_history[it-1])
+                if rel_change < tol:
                     self.covergence = True
                     print("Early stopping")
                     break
@@ -465,13 +468,10 @@ def main():
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
     y = np.clip(ystar, l, u).copy()
 
-
-    y_scaled, sigma_y_scaled, l_scaled, u_scaled, mu_y, sd_y = aux_f.scale_y(y, l, u, sigma_y_true)
-
     start = time.perf_counter()
     
     model_vi = SparseTobitVI(
-        X, y_scaled,
+        X, y,
         tau2= args.tau2,
         pi0= args.pi0, 
         seed= args.seed,
@@ -490,7 +490,6 @@ def main():
 
     summary = model_vi.summary()
     summary["n_iters"] = len(model_vi.elbo_history)
-    summary = summary_orig(summary, mu_y, sd_y, aux_f.intercept_idx(X))
 
     comput_time= {
         "total": total_time,

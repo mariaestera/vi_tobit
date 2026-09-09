@@ -17,6 +17,7 @@ def parse_args():
 
     # sampler params
     parser.add_argument("--n_iter", type=int, required=False, default = 1000, help="maximum number of CAVI full iterations after EM warmup")
+    parser.add_argument("--em", type=int, required=False, default = 1, help= "em: 1 - with EM steps, 0 - without EM")
     parser.add_argument("--em-warm_up", type=int, required=False, default = 100, help= "number of initial iterations without update hyperparams")
     parser.add_argument("--gamma_batch", type=int, required=False, default=-1, help="number of the gamma_i updated together; -1 - fully parralel update")
     parser.add_argument("--tol", type=float, required=False, default = 0.01, help="treshold for ELBO divergence")
@@ -422,7 +423,7 @@ class SparseTobitStructuredVI:
         
     
     # ------------------------------------------------------------------
-    def step(self, it, warmup, damping, gamma_batch_size):
+    def step(self, em, damping, gamma_batch_size):
 
         start = time.perf_counter()
         self.update_beta()
@@ -440,28 +441,60 @@ class SparseTobitStructuredVI:
         
         self.elbo_history.append(self.compute_elbo())
 
-        if it >=  warmup:
+        if em:
             self.update_tau2(damping)
             self.update_pi0(damping)
 
-    def fit(self, n_iter=1000, em_warmup=50, damping=0.3, tol=0.01, gamma_batch_size=-1, verbose=True):
+    def fit(self, n_iter=1000, em = True, em_warmup=0, damping=0.3, tol = 1e-5, gamma_batch_size=-1, verbose=True):
 
         start = time.perf_counter()
         
-        pbar = tqdm(range(n_iter + em_warmup), desc="MFVI", disable=not verbose)
+        n_it = em_warmup if em else n_iter
+        desc = "MFVI (em_warmup)" if em else "MFVI"
+        
+        pbar = tqdm(range(n_it), desc = desc, disable=not verbose)
         
         for it in pbar:
-            self.step(it, em_warmup, damping, gamma_batch_size)
-            pbar.set_postfix(elbo=f"{self.elbo_history[it]:.4f}")
             
-            if it > em_warmup:
-                if abs(self.elbo_history[it] - self.elbo_history[it-1]) < tol:
+            self.step(em=False, damping = damping, gamma_batch_size = gamma_batch_size)
+            
+            pbar.set_postfix(elbo=f"{self.elbo_history[it]:.4f}")
+
+            rel_change = abs(self.elbo_history[it] - self.elbo_history[it-1]) / abs(self.elbo_history[it-1])
+                
+            if rel_change < tol  and it >10:
+                
+                if em:
+                    print("Early stopping em_warmup")
+
+                else:   
                     self.covergence = True
                     print("Early stopping")
-                    break
+                    
+                break
         else:
-            self.covergence = False
-            print("ELBO didn't converge")
+            if not em:
+                self.covergence = False
+                print("ELBO didn't converge")
+
+        if em:
+            n_it = n_iter - em_warmup
+            desc = "MFVI (EM)"
+            
+            pbar = tqdm(range(n_it), desc = desc, disable=not verbose)
+            
+            for it in pbar:
+                
+                self.step(em=False, damping = damping, gamma_batch_size = gamma_batch_size)
+                
+                pbar.set_postfix(elbo=f"{self.elbo_history[it]:.4f}")
+    
+                rel_change = abs(self.elbo_history[it] - self.elbo_history[it-1]) / abs(self.elbo_history[it-1])
+                    
+                if rel_change < tol and it >10:
+                    print("Early stopping")
+                    break
+            
 
         self.total_fit_time = time.perf_counter() - start
         
@@ -523,13 +556,10 @@ def main():
     y = np.clip(ystar, l, u).copy()
     beta_blocks = np.load(f"{input_folder}/beta_blocks.npy")
 
-
-    y_scaled, sigma_y_scaled, l_scaled, u_scaled, mu_y, sd_y = aux_f.scale_y(y, l, u, sigma_y_true)
-
     start = time.perf_counter()
     
     model_vi = SparseTobitStructuredVI(
-        X, y_scaled,
+        X, y,
         beta_blocks = beta_blocks,
         tau2= args.tau2,
         pi0= args.pi0, 
@@ -540,6 +570,7 @@ def main():
     
     model_vi.fit(
         n_iter = args.n_iter, 
+        em = False if args.em == 0 else True,
         em_warmup = args.em_warm_up, 
         gamma_batch_size = args.gamma_batch,
         tol = args.tol
@@ -549,7 +580,6 @@ def main():
 
     summary = model_vi.summary()
     summary["n_iters"] = len(model_vi.elbo_history)
-    summary = summary_orig(summary, mu_y, sd_y, aux_f.intercept_idx(X))
 
     comput_time= {
         "total": total_time,

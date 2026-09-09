@@ -327,14 +327,12 @@ def main():
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
     y = np.clip(ystar, l, u).copy()
 
-    y_scaled, sigma_y_scaled, l_scaled, u_scaled, mu_y, sd_y, = aux_f.scale_y(y, l, u, sigma_y_true)
-
     n_iter, burn_in = args.n_iter, args.burn_in
 
     total_time = time.perf_counter()
     
     model_gibbs = SparseTobitGibbs(
-        X, y_scaled,
+        X, y,
         tau2 = args.tau2,
         pi0 = args.pi0,
         seed = args.seed,
@@ -353,8 +351,6 @@ def main():
         "gamma": gamma_samples,
         "sigma": sigma_samples
     }
-
-    samples = samples_orig(samples, mu_y, sd_y, aux_f.intercept_idx(X))
 
     comput_time= {
         "total": total_time,

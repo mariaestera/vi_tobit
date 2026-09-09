@@ -1,4 +1,4 @@
-# Variational Inference for Tobit model
+# Variational Inference for the Tobit model
 
 ### Scenario 1 (baseline):
 
