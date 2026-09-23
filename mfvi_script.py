@@ -90,6 +90,8 @@ class SparseTobitVI:
 
         self._init_params()
         self.elbo_history = []
+        self.tau2_history = []
+        self.pi0_history = []
         self.covergence = None
 
         self.total_fit_time = 0
@@ -381,12 +383,15 @@ class SparseTobitVI:
         self.gamma_fit_time += time.perf_counter() - start
         
         self.update_sigma()
-        
-        self.elbo_history.append(self.compute_elbo())
 
         if it >=  warmup:
             self.update_tau2(damping)
             self.update_pi0(damping)
+            
+            self.tau2_history.append(self.tau2)
+            self.tau2_history.append(self.pi0)
+
+        self.elbo_history.append(self.compute_elbo())
 
     def fit(self, n_iter=1000, em_warmup=50, damping=0.3, tol = 1e-5, gamma_batch_size=-1, verbose=True):
 

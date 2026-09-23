@@ -20,7 +20,7 @@ def parse_args():
     parser.add_argument("--em", type=int, required=False, default = 1, help= "em: 1 - with EM steps, 0 - without EM")
     parser.add_argument("--em-warm_up", type=int, required=False, default = 100, help= "number of initial iterations without update hyperparams")
     parser.add_argument("--gamma_batch", type=int, required=False, default=-1, help="number of the gamma_i updated together; -1 - fully parralel update")
-    parser.add_argument("--tol", type=float, required=False, default = 0.01, help="treshold for ELBO divergence")
+    parser.add_argument("--tol", type=float, required=False, default = 10e-5, help="treshold for ELBO divergence")
 
     # initialization
     parser.add_argument("--tau2", type=float, required=False, default=100, help="Initial prior variance")
@@ -109,6 +109,8 @@ class SparseTobitStructuredVI:
 
         self._init_params()
         self.elbo_history = []
+        self.tau2_history = []
+        self.pi0_history = []
         self.covergence = None
 
         self.total_fit_time = 0
@@ -423,7 +425,7 @@ class SparseTobitStructuredVI:
         
     
     # ------------------------------------------------------------------
-    def step(self, em, damping, gamma_batch_size):
+    def step(self, em_pi0, em_tau2, damping, gamma_batch_size):
 
         start = time.perf_counter()
         self.update_beta()
@@ -441,63 +443,121 @@ class SparseTobitStructuredVI:
         
         self.elbo_history.append(self.compute_elbo())
 
-        if em:
+        if em_tau2:
             self.update_tau2(damping)
+            self.tau2_history.append(self.tau2)
+            
+        if em_pi0:
             self.update_pi0(damping)
+            self.pi0_history.append(self.pi0)
 
-    def fit(self, n_iter=1000, em = True, em_warmup=0, damping=0.3, tol = 1e-5, gamma_batch_size=-1, verbose=True):
-
-        start = time.perf_counter()
+    def fit(
+        self,
+        n_iter=1000,
+        em_pi0=True,
+        em_tau2 = True,
+        em_warmup=0,
+        damping=0.3,
+        tol=1e-5,
+        gamma_batch_size=-1,
+        verbose=True
+    ):
         
+        start = time.perf_counter()
+
+        em = em_pi0 or em_tau2
         n_it = em_warmup if em else n_iter
         desc = "MFVI (em_warmup)" if em else "MFVI"
-        
-        pbar = tqdm(range(n_it), desc = desc, disable=not verbose)
-        
+    
+        pbar = tqdm(range(n_it), desc=desc, disable=not verbose)
+    
+        current_iter = 0
+    
+        # --------------------------------------------------
+        # Warm-up / standard MFVI
+        # --------------------------------------------------
         for it in pbar:
-            
-            self.step(em=False, damping = damping, gamma_batch_size = gamma_batch_size)
-            
-            pbar.set_postfix(elbo=f"{self.elbo_history[it]:.4f}")
-
-            rel_change = abs(self.elbo_history[it] - self.elbo_history[it-1]) / abs(self.elbo_history[it-1])
-                
-            if rel_change < tol  and it >10:
-                
-                if em:
-                    print("Early stopping em_warmup")
-
-                else:   
-                    self.covergence = True
-                    print("Early stopping")
-                    
-                break
+    
+            self.step(
+                em_pi0 = False,
+                em_tau2 = False,
+                damping=damping,
+                gamma_batch_size=gamma_batch_size
+            )
+    
+            # ELBO was just appended at current_iter
+            pbar.set_postfix(
+                elbo=f"{self.elbo_history[current_iter]:.4f}"
+            )
+    
+            if current_iter > 0:
+    
+                rel_change = (
+                    abs(
+                        self.elbo_history[current_iter]
+                        - self.elbo_history[current_iter - 1]
+                    )
+                    / abs(self.elbo_history[current_iter - 1])
+                )
+    
+                if rel_change < tol and it > 10:
+    
+                    current_iter += 1
+    
+                    if em:
+                        print("Early stopping em_warmup")
+                    else:
+                        self.covergence = True
+                        print("Early stopping")
+    
+                    break
+    
+            current_iter += 1
+    
         else:
             if not em:
                 self.covergence = False
                 print("ELBO didn't converge")
-
-        if em:
-            n_it = n_iter - em_warmup
-            desc = "MFVI (EM)"
-            
-            pbar = tqdm(range(n_it), desc = desc, disable=not verbose)
-            
-            for it in pbar:
-                
-                self.step(em=False, damping = damping, gamma_batch_size = gamma_batch_size)
-                
-                pbar.set_postfix(elbo=f"{self.elbo_history[it]:.4f}")
     
-                rel_change = abs(self.elbo_history[it] - self.elbo_history[it-1]) / abs(self.elbo_history[it-1])
-                    
-                if rel_change < tol and it >10:
+        # --------------------------------------------------
+        # EM
+        # --------------------------------------------------
+        if em:
+    
+            n_it = n_iter - current_iter
+            desc = "MFVI (EM)"
+    
+            pbar = tqdm(range(n_it), desc=desc, disable=not verbose)
+    
+            for it in pbar:
+    
+                self.step(
+                    em_pi0=em_pi0,
+                    em_tau2=em_tau2,
+                    damping=damping,
+                    gamma_batch_size=gamma_batch_size
+                )
+    
+                pbar.set_postfix(
+                    elbo=f"{self.elbo_history[current_iter]:.4f}"
+                )
+    
+                rel_change = (
+                    abs(
+                        self.elbo_history[current_iter]
+                        - self.elbo_history[current_iter - 1]
+                    )
+                    / abs(self.elbo_history[current_iter - 1])
+                )
+    
+                current_iter += 1
+    
+                if rel_change < tol and it > 10:
                     print("Early stopping")
                     break
-            
-
+    
         self.total_fit_time = time.perf_counter() - start
-        
+    
         return self
 
     # ------------------------------------------------------------------
@@ -570,7 +630,8 @@ def main():
     
     model_vi.fit(
         n_iter = args.n_iter, 
-        em = False if args.em == 0 else True,
+        em_pi0 = False if args.em == 0 else True,
+        em_tau2 = False if args.em == 0 else True,
         em_warmup = args.em_warm_up, 
         gamma_batch_size = args.gamma_batch,
         tol = args.tol
@@ -586,6 +647,8 @@ def main():
         "fit": model_vi.total_fit_time,
         "gamma": model_vi.gamma_fit_time
     }
+
+    np.save(f"{output_folder}/elbo_history.npy", model_vi.elbo_history)
     
     mfvi_eval(summary, X, ystar, comput_time, args)
 
