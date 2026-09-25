@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import time
 from gibbs_eval import gibbs_eval
 import aux_functions as aux_f
+from scipy.stats import norm
 
 
 def parse_args():
@@ -33,6 +34,7 @@ def parse_args():
     
     # other settings
     parser.add_argument("--seed", type=int, required=False, default=None, help = "random seed")
+    parser.add_argument("--save_chains_path", type=str, required=False, default=None, help = "path for saving chains")
 
     args = parser.parse_args()
     return args, parser
@@ -79,6 +81,7 @@ class SparseTobitGibbs():
         self.beta_history = []
         self.gamma_history = []
         self.sigma_history = []
+        self.g_history = []
         
         self.total_fit_time = 0
         self.beta_fit_time = 0
@@ -98,6 +101,74 @@ class SparseTobitGibbs():
         self.ystar[self.mask_mid] = self.y[self.mask_mid]
         self.ystar[self.mask_l] = self.l
         self.ystar[self.mask_u] = self.u
+
+
+    # ------------------------------------------------------------------
+
+    def compute_loglik(self):
+        """
+        Compute the observed-data log-likelihood of the Tobit model at the
+        current state (beta, gamma, sigma2), evaluated on the OBSERVED y
+        (not the latent y*).
+    
+        For uncensored observations (l < y_i < u):
+            log N(y_i; eta_i, sigma2)
+        For left-censored observations (y_i = l):
+            log P(y*_i <= l) = log Phi((l - eta_i) / sigma)
+        For right-censored observations (y_i = u):
+            log P(y*_i >= u) = log Phi(-(u - eta_i) / sigma) = log Phi((eta_i - u) / sigma)
+        """
+        eta = self.X[:, self.active] @ self.beta[self.active]
+        sigma = np.sqrt(self.sigma2)
+    
+        ll = 0.0
+    
+        # Uncensored observations: standard Gaussian log-density
+        if self.mask_mid.any():
+            idx = self.mask_mid
+            ll += np.sum(norm.logpdf(self.y[idx], loc=eta[idx], scale=sigma))
+    
+        # Left-censored observations: log CDF at the threshold
+        if self.mask_l.any():
+            idx = self.mask_l
+            z = (self.l - eta[idx]) / sigma
+            ll += np.sum(norm.logcdf(z))
+    
+        # Right-censored observations: log survival function at the threshold
+        if self.mask_u.any():
+            idx = self.mask_u
+            z = (eta[idx] - self.u) / sigma
+            ll += np.sum(norm.logcdf(z))
+    
+        return ll
+
+    # ------------------------------------------------------------------
+    def compute_logprior(self):
+        """
+        Unnormalized log-prior density at the current state (beta, gamma, sigma2).
+        Terms that don't depend on parameters (e.g. combinatorial constants) can
+        be dropped -- they cancel in Geweke's difference of window means.
+        """
+        lp = 0.0
+    
+        # beta | tau2 ~ N(0, tau2 I)  (evaluated only on active coordinates
+        # matches the model as coded: inactive betas are still resampled from
+        # the prior each step in update_beta, so include all coordinates)
+        lp += np.sum(norm.logpdf(self.beta, loc=0.0, scale=np.sqrt(self.tau2)))
+    
+        # gamma_j ~ Bernoulli(pi0), iid
+        lp += np.sum(self.gamma * np.log(self.pi0) + (1 - self.gamma) * np.log1p(-self.pi0))
+    
+        # sigma2 ~ InvGamma(eps, eps)  [note: __init__ uses delta, eps -- match your actual hyperparameters]
+        lp += invgamma.logpdf(self.sigma2, self.delta, scale=self.eps)
+    
+        return lp
+
+    def compute_log_posterior(self):
+        """Unnormalized log-posterior log p(beta, gamma, sigma2 | y), used as
+        the scalar summary g_t for the generalized Geweke diagnostic
+        (Cowles & Carlin 1996)."""
+        return self.compute_loglik() + self.compute_logprior()
 
     # ------------------------------------------------------------------
     def update_ystar(self):
@@ -275,6 +346,8 @@ class SparseTobitGibbs():
         self.beta_history.append(self.beta.copy())
         self.gamma_history.append(self.gamma.copy())
         self.sigma_history.append(self.sigma2)
+        self.g_history.append(-2 * self.compute_log_posterior())
+        
     
     # ------------------------------------------------------------------
     def fit(self, n_iter=2000, burn_in=500, gamma_batch_size = -1, verbose=True):
@@ -349,7 +422,8 @@ def main():
     samples = {
         "beta": beta_samples,
         "gamma": gamma_samples,
-        "sigma": sigma_samples
+        "sigma": sigma_samples,
+        "log_posterior": model_gibbs.g_history
     }
 
     comput_time= {
@@ -359,6 +433,11 @@ def main():
     }
     
     gibbs_eval(samples, X, ystar, comput_time, args)
+
+    if args.save_chains_path is not None:
+        for name, chain in samples.items():
+            np.save(f"{args.output_folder}/{name}_chain.npy", chain)
+
 
 if __name__ == "__main__":
     main()

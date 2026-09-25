@@ -34,6 +34,7 @@ def parse_args():
     
     # other settings
     parser.add_argument("--seed", type=int, required=False, default=None, help = "random seed")
+    parser.add_argument("--save_chains_path", type=str, required=False, default=None, help = "path for saving chains")
 
     args = parser.parse_args()
     return args, parser
@@ -299,6 +300,10 @@ def main():
     }
     
     gibbs_eval(samples, X, ystar, comput_time, args, model_name = "ols")
+
+    if args.save_chains_path is not None:
+        for name, chain in samples:
+            np.save(f"{args.output_folder}/{name}_chain.npy", chain)
 
 if __name__ == "__main__":
     main()

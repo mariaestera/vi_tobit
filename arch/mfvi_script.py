@@ -361,7 +361,7 @@ class SparseTobitVI:
         self.tau2 = (1 - damping) * self.tau2 + damping * tau2_new
     
     
-    def update_pi0(self, damping=0.3):
+    def update_pi0(self, damping=1):
         pi0_new = np.clip(self.rho.mean(), 1e-4, 1 - 1e-4)
         self.pi0 = (1 - damping) * self.pi0 + damping * pi0_new
         self.logit_pi0 = logit(self.pi0)
@@ -393,7 +393,7 @@ class SparseTobitVI:
 
         self.elbo_history.append(self.compute_elbo())
 
-    def fit(self, n_iter=1000, em_warmup=50, damping=0.3, tol = 1e-5, gamma_batch_size=-1, verbose=True):
+    def fit(self, n_iter=1000, em_warmup=50, damping=1, tol = 1e-5, gamma_batch_size=-1, verbose=True):
 
         start = time.perf_counter()
         

@@ -1,0 +1,4 @@
+scenario,n_simulations,burn_in,n_iters,max_psrf_beta,max_psrf_gamma,n_above_1.1_beta_min,n_above_1.1_beta_max,n_above_1.1_beta_median,n_above_1.1_gamma_min,n_above_1.1_gamma_max,n_above_1.1_gamma_median
+4,10,2000,3000,1.1131295198648476,1.163670733173863,1,1,1,3,3,3
+4,10,2000,4000,1.057426737640495,1.1133874861192943,0,0,0,1,1,1
+4,10,2000,4000,1.057426737640495,1.1133874861192943,0,0,0,1,1,1
