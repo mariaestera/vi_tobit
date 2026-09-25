@@ -4,34 +4,32 @@
 #SBATCH --partition=defaultp          # 3. Request a partition
 #SBATCH --qos=normal                  # 4. Request a QoS
 #SBATCH --ntasks=1                   # 5. Request total number of tasks (MPI workers)
+#SBATCH --cpus-per-task=16
 #SBATCH --nodes=1                     #    Request number of node(s)
-#SBATCH --mem=30G                     # 6. Request total amount of RAM
-#SBATCH --time=1-00:00:00             # 7. Job execution duration limit day-hour:min:sec
-#SBATCH --array=0-99                   # 9. Run 10 array tasks, one per seed
-##SBATCH --output=%x_%A_%a.out         # 8. Standard output log as $job_name_$array_job_id_$array_task_id.out
-##SBATCH --error=%x_%A_%a.err          #    Standard error log as $job_name_$array_job_id_$array_task_id.err
+#SBATCH --mem=100G                     # 6. Request total amount of RAM
+#SBATCH --time=0-05:00:00             # 7. Job execution duration limit day-hour:min:sec
+##SBATCH --output=%x_%j.out            # 8. Standard output log as $job_name_$job_id.out
+##SBATCH --error=%x_%j.err             #    Standard error log as $job_name_$job_id.err
 # Do not export the local environment to the compute nodes
 #    this is often needed because our cluster is quite heterogenous
 #SBATCH --export=NONE
 unset SLURM_EXPORT_ENV
 module load python/3.14.2
 pip install arviz
+
 # print the start time
 date
 
-# List of 10 random seeds, one per array task
-seeds=(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99)
-seed=${seeds[$SLURM_ARRAY_TASK_ID]}
-
-scenario_name="scenario_4"
+seed=22
+scenario_name="scenario_5"
 input_folder="Jupyter/vi_tobit/simulations/X_design/${scenario_name}_${seed}"
 output_folder="Jupyter/vi_tobit/simulations/${scenario_name}/${seed}"
 mkdir -p "$input_folder"
 mkdir -p "$output_folder"
 
 srun python Jupyter/vi_tobit/simulate_data_script.py \
-    -n 5000 \
-    -d 20000 \
+    -n 30000 \
+    -d 40000 \
     -X_structure AR \
     --intercept 1 \
     --k 100 \
@@ -43,38 +41,34 @@ srun python Jupyter/vi_tobit/simulate_data_script.py \
     --input_folder "$input_folder" \
     --output_folder "$output_folder" \
     --seed $seed \
-    --test 1000 
+    --test 1000 \
 
 srun python Jupyter/vi_tobit/mfvi_blocks_script.py \
     -input_folder "$input_folder"\
     -output_folder "$output_folder"\
-    --pi0 0.01 \
-    --tau2 	0.0050 \
+    --pi0 0.005 \
+    --tau2 0.0025 \
     --seed $seed \
-    --gamma_batch 100 \
-    --em-warm_up 0 \
-    --n_iter 1000 \
-    --beta_blocks 1
+    --gamma_batch 1000 \
+    --em-warm_up 10 \
+    --n_iter 500
 
 srun python Jupyter/vi_tobit/gibbs_script.py \
     -input_folder "$input_folder"\
     -output_folder "$output_folder"\
-    -n_iter 4000 \
-    -burn_in 2000 \
+    -n_iter 2000 \
+    -burn_in 500 \
     --pi0 0.01 \
-    --tau2 	0.0050 \
+    --tau2 0.0025 \
     --seed $seed \
-    --gamma_batch 100 
+    --gamma_batch 1000
 
 srun python Jupyter/vi_tobit/ols_script.py \
     -input_folder "$input_folder"\
     -output_folder "$output_folder"\
-    -n_iter 4000 \
-    -burn_in 2000 \
+    -n_iter 2000 \
+    -burn_in 500 \
     --pi0 0.01 \
-    --tau2 	0.0050 \
+    --tau2 0.0025 \
     --seed $seed \
-    --gamma_batch 100
-
-    
-rm -rf "$input_folder"
+    --gamma_batch 1000

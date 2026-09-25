@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument("--n_iter", type=int, required=False, default = 1000, help="maximum number of CAVI full iterations after EM warmup")
     parser.add_argument("--em", type=int, required=False, default = 1, help= "em: 1 - with EM steps, 0 - without EM")
     parser.add_argument("--em-warm_up", type=int, required=False, default = 100, help= "number of initial iterations without update hyperparams")
-    parser.add_argument("--beta_blocks", type=bool, required=False, default = None, help= "blocks or full beta updates")
+    parser.add_argument("--beta_blocks", type=int, required=False, default = 0, help= "blocks or full beta updates 0 false, 1 = true")
     parser.add_argument("--gamma_batch", type=int, required=False, default=-1, help="number of the gamma_i updated together; -1 - fully parralel update")
     parser.add_argument("--tol", type=float, required=False, default = 10e-5, help="treshold for ELBO divergence")
 
@@ -616,10 +616,12 @@ def main():
     l, u,  sigma_y_true = list(np.load(f"{input_folder}/l_u_sigma.npy"))
     y = np.clip(ystar, l, u).copy()
 
-    if args.beta_blocks is not None:
+    if args.beta_blocks == 1:
         beta_blocks = np.load(f"{input_folder}/beta_blocks.npy")
+        print("Block updates of beta")
     else:
         beta_blocks = None  # joint update of beta (no blocking)
+        print("Joint updates of beta")
         
     start = time.perf_counter()
     
