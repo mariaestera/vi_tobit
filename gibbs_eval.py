@@ -114,9 +114,13 @@ def gibbs_eval(samples, X_train, y_latent_train, time, args, model_name = "gibbs
     
     beta_stats_df.to_csv(f"{output_folder}/{model_name}_{args.seed}_beta.csv", index=False)
 
+    y = np.clip(y_latent_train, l, u)
+    obs_var = np.var(y)
 
     sigma_df = pd.DataFrame([{
         "parameter": "sigma",
+        "observed_variance": obs_var,
+        "observed_std": np.sqrt(obs_var),
         "true_value": sigma_y_true,
         "mean": sigma_mean,
         "std": sigma_std,
@@ -129,7 +133,7 @@ def gibbs_eval(samples, X_train, y_latent_train, time, args, model_name = "gibbs
 
 
     # --- stats -------------------------------------------------------------------
-    pip_tr = [0.1, 0.5, 0.9, 0.95, 0.99]
+    pip_tr = [i / 10 for i in range(1, 10)]
 
     true_sig = (beta_true !=0).astype(int)
     df = aux_f.stats(true_sig, pip, pip_tr,

@@ -1,0 +1,5 @@
+scenario,n_burn_in,n_post_burn_in,n_chains,n_variables,n_pairs,selection_threshold,jaccard_min,jaccard_max,jaccard_median,n_selected_min,n_selected_max,n_selected_median
+3,500,2000,3,1001,3,0.5,0.9375,1.0,0.9375,15,16,15.0
+3,500,2000,10,1001,45,0.5,0.875,1.0,0.9375,15,16,15.0
+2,500,2500,10,1001,45,0.5,0.7142857142857143,1.0,0.8461538461538461,10,14,12.0
+2,500,2500,10,1001,45,0.5,0.7142857142857143,1.0,0.8461538461538461,10,14,12.0

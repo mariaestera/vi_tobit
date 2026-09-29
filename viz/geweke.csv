@@ -1,0 +1,4 @@
+scenario,burn_in,n_iters,n_tests,pct_passed_alpha_0.05,bonferroni_alpha,bonferroni_ok
+3,500,2000,3,100.0,0.016666666666666666,True
+3,500,2000,10,80.0,0.005,True
+2,500,2500,10,100.0,0.005,True
