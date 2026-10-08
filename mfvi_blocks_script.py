@@ -125,7 +125,7 @@ class SparseTobitStructuredVI:
         d, n = self.d, self.n
 
         self.a = self.delta + n / 2
-        self.b = np.var(self.y) * self.a  
+        self.b = 5*np.var(self.y) * self.a  ### latent variance init (!!!)
 
         self.rho = self.rng.uniform(0, 1, d)
         beta0 = self.rng.normal(0, np.sqrt(self.tau2), d)
@@ -135,6 +135,7 @@ class SparseTobitStructuredVI:
             self.tau2 * np.eye(np.sum(self.beta_blocks == k))
             for k in self.unique_blocks
         ]
+        
         self.S_diag = self.tau2 * np.ones(len(self.beta_blocks))
 
         self.eta = self.X @ self.m

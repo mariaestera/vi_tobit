@@ -95,7 +95,7 @@ class SparseTobitGibbs():
         self.gamma = self.rng.binomial(1, self.pi0, d).astype(float)
         self.active = self.gamma == 1
         self.beta = self.rng.normal(0, np.sqrt(self.tau2), d)
-        self.sigma2 = np.var(self.y)
+        self.sigma2 = 5 * np.var(self.y) ### latent variance init (!!!)
 
         self.ystar = np.empty(n, dtype=float)
         self.ystar[self.mask_mid] = self.y[self.mask_mid]
